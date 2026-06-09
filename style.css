@@ -1,0 +1,487 @@
+:root {
+  color-scheme: dark;
+  --bg: #090b12;
+  --card: rgba(255, 255, 255, 0.09);
+  --card-strong: rgba(255, 255, 255, 0.14);
+  --text: #f5f7fb;
+  --muted: #a9b0c0;
+  --accent: #8effd2;
+  --accent-2: #91a7ff;
+  --warn: #ffd166;
+  --bad: #ff6b6b;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  color: var(--text);
+  background:
+    radial-gradient(circle at 20% 10%, rgba(142, 255, 210, 0.18), transparent 28rem),
+    radial-gradient(circle at 80% 0%, rgba(145, 167, 255, 0.20), transparent 30rem),
+    linear-gradient(135deg, #090b12 0%, #121521 52%, #080910 100%);
+}
+
+.app {
+  width: min(1080px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 48px 0;
+}
+
+.hero,
+.meter-card,
+.roll-card,
+.tips {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--card);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(18px);
+  border-radius: 28px;
+}
+
+.hero {
+  padding: 40px;
+  margin-bottom: 22px;
+}
+
+.eyebrow,
+.label {
+  margin: 0;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.76rem;
+}
+
+h1 {
+  max-width: 760px;
+  margin: 10px 0 14px;
+  font-size: clamp(2.3rem, 7vw, 5.6rem);
+  line-height: 0.95;
+  letter-spacing: -0.07em;
+}
+
+.intro {
+  max-width: 720px;
+  margin: 0;
+  color: #d7dceb;
+  font-size: 1.08rem;
+  line-height: 1.7;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 28px;
+}
+
+button {
+  border: 0;
+  border-radius: 999px;
+  padding: 13px 22px;
+  color: #07100d;
+  background: var(--accent);
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform 160ms ease, opacity 160ms ease, background 160ms ease;
+}
+
+button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+#stopButton {
+  color: var(--text);
+  background: var(--card-strong);
+}
+
+.status {
+  min-height: 1.5em;
+  margin: 18px 0 0;
+  color: var(--muted);
+}
+
+.meter-card {
+  padding: 34px;
+}
+
+@media (min-width: 1180px) {
+  .app {
+    width: min(980px, calc(100% - 330px));
+    margin-left: 300px;
+    margin-right: 24px;
+  }
+
+  .meter-card {
+    position: fixed;
+    z-index: 8;
+    top: 24px;
+    left: 22px;
+    width: 250px;
+    max-height: calc(100vh - 48px);
+    overflow: auto;
+    padding: 18px;
+    border-radius: 22px;
+  }
+
+  .meter-card .note-row {
+    display: block;
+  }
+
+  .meter-card .note-name {
+    margin-top: 8px;
+    font-size: 4rem;
+    letter-spacing: -0.07em;
+  }
+
+  .meter-card .frequency {
+    min-width: 0;
+    margin-top: 10px;
+    text-align: left;
+    font-size: 1.8rem;
+  }
+
+  .meter-card .tuner {
+    margin: 22px 0 18px;
+  }
+
+  .meter-card .track {
+    height: 42px;
+  }
+
+  .meter-card .needle {
+    top: 7px;
+    width: 7px;
+    height: 28px;
+  }
+
+  .meter-card .cents {
+    font-size: 0.96rem;
+  }
+
+  .meter-card .details {
+    grid-template-columns: 1fr;
+  }
+
+  .meter-card .details div {
+    padding: 12px;
+    border-radius: 14px;
+  }
+
+  .meter-card .details strong {
+    font-size: 0.98rem;
+  }
+}
+
+.roll-card {
+  margin-top: 22px;
+  padding: 30px;
+}
+
+.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.section-heading h2 {
+  margin: 5px 0 0;
+  font-size: clamp(1.45rem, 4vw, 2.2rem);
+  letter-spacing: -0.04em;
+}
+
+#clearRollButton {
+  color: var(--text);
+  background: var(--card-strong);
+}
+
+.roll-wrap {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 22px;
+  background: #070910;
+}
+
+#pitchRoll {
+  display: block;
+  width: 100%;
+  height: min(68vh, 680px);
+  min-height: 430px;
+  cursor: crosshair;
+}
+
+.range-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 16px;
+  color: var(--muted);
+}
+
+.range-control span {
+  margin-right: 4px;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.range-button {
+  padding: 8px 12px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.10);
+  font-size: 0.9rem;
+}
+
+.range-button.active {
+  color: #07100d;
+  background: var(--accent);
+}
+
+.roll-help {
+  margin: 14px 0 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.note-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.note-name {
+  margin-top: 6px;
+  font-size: clamp(4.5rem, 20vw, 12rem);
+  line-height: 0.82;
+  font-weight: 900;
+  letter-spacing: -0.08em;
+}
+
+.frequency {
+  min-width: 170px;
+  text-align: right;
+  color: var(--accent);
+  font-size: clamp(2rem, 7vw, 4rem);
+  font-weight: 850;
+}
+
+.frequency small {
+  display: block;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.tuner {
+  margin: 36px 0 28px;
+}
+
+.scale {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin-bottom: 9px;
+}
+
+.track {
+  position: relative;
+  height: 70px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: linear-gradient(90deg, var(--bad), var(--warn) 32%, var(--accent) 50%, var(--warn) 68%, var(--bad));
+}
+
+.center-line {
+  position: absolute;
+  inset: 0 auto 0 50%;
+  width: 3px;
+  background: rgba(8, 11, 18, 0.72);
+  transform: translateX(-50%);
+}
+
+.needle {
+  position: absolute;
+  top: 9px;
+  left: 50%;
+  width: 10px;
+  height: 52px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 0 24px rgba(255, 255, 255, 0.76);
+  transform: translateX(-50%);
+  transition: left 90ms linear;
+}
+
+.cents {
+  min-height: 1.4em;
+  margin: 14px 0 0;
+  color: #dce3f6;
+  text-align: center;
+  font-size: 1.1rem;
+  font-weight: 800;
+}
+
+.details {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.details div {
+  padding: 18px;
+  border-radius: 20px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.details strong {
+  display: block;
+  margin-top: 7px;
+  font-size: 1.1rem;
+}
+
+.tips {
+  margin-top: 22px;
+  padding: 28px 34px;
+}
+
+.tips h2 {
+  margin: 0 0 12px;
+  font-size: 1.2rem;
+}
+
+.tips ul {
+  margin: 0;
+  padding-left: 20px;
+  color: #d7dceb;
+  line-height: 1.8;
+}
+
+@media (max-width: 720px) {
+  body {
+    padding-bottom: calc(150px + env(safe-area-inset-bottom));
+  }
+
+  .app {
+    width: min(100% - 20px, 1080px);
+    padding: 20px 0;
+  }
+
+  .hero,
+  .meter-card,
+  .roll-card,
+  .tips {
+    border-radius: 22px;
+  }
+
+  .hero,
+  .meter-card,
+  .roll-card {
+    padding: 24px;
+  }
+
+  .section-heading {
+    display: block;
+  }
+
+  #clearRollButton {
+    margin-top: 14px;
+  }
+
+  #pitchRoll {
+    height: 360px;
+    min-height: 360px;
+  }
+
+  .actions {
+    border-radius: 24px;
+  }
+
+  .note-row {
+    display: block;
+  }
+
+  .frequency {
+    margin-top: 18px;
+    text-align: left;
+  }
+
+  .details {
+    grid-template-columns: 1fr;
+  }
+
+  .meter-card {
+    position: fixed;
+    z-index: 12;
+    left: 10px;
+    right: 10px;
+    bottom: calc(10px + env(safe-area-inset-bottom));
+    padding: 12px;
+    border-radius: 20px;
+  }
+
+  .meter-card .note-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .meter-card .note-name {
+    margin-top: 4px;
+    font-size: 2.7rem;
+  }
+
+  .meter-card .frequency {
+    min-width: 88px;
+    margin-top: 0;
+    text-align: right;
+    font-size: 1.25rem;
+  }
+
+  .meter-card .frequency small {
+    font-size: 0.7rem;
+  }
+
+  .meter-card .tuner {
+    margin: 10px 0 0;
+  }
+
+  .meter-card .scale {
+    display: none;
+  }
+
+  .meter-card .track {
+    height: 30px;
+  }
+
+  .meter-card .needle {
+    top: 5px;
+    width: 6px;
+    height: 20px;
+  }
+
+  .meter-card .cents {
+    min-height: 1.2em;
+    margin: 7px 0 0;
+    font-size: 0.88rem;
+  }
+
+  .meter-card .details {
+    display: none;
+  }
+}

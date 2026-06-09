@@ -1,0 +1,517 @@
+const startButton = document.querySelector("#startButton");
+const stopButton = document.querySelector("#stopButton");
+const statusText = document.querySelector("#status");
+const noteName = document.querySelector("#noteName");
+const frequencyValue = document.querySelector("#frequencyValue");
+const centsText = document.querySelector("#centsText");
+const targetFrequency = document.querySelector("#targetFrequency");
+const stability = document.querySelector("#stability");
+const volume = document.querySelector("#volume");
+const needle = document.querySelector("#needle");
+const pitchRoll = document.querySelector("#pitchRoll");
+const clearRollButton = document.querySelector("#clearRollButton");
+const rangeButtons = document.querySelectorAll(".range-button");
+const rollContext = pitchRoll.getContext("2d");
+
+const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+const pitchHistory = [];
+const pitchTimeline = [];
+const rollWindowMs = 14000;
+const vocalRanges = {
+  bass: { min: 36, max: 67 },
+  tenor: { min: 43, max: 76 },
+  alto: { min: 48, max: 81 },
+  soprano: { min: 55, max: 88 },
+  wide: { min: 33, max: 93 },
+};
+
+let audioContext;
+let referenceAudioContext;
+let analyser;
+let microphone;
+let mediaStream;
+let animationId;
+let rollAnimationId;
+let buffer;
+let minMidi = vocalRanges.tenor.min;
+let maxMidi = vocalRanges.tenor.max;
+let lastRollLayout = { keyboardWidth: 76, height: 430 };
+
+startButton.addEventListener("click", startListening);
+stopButton.addEventListener("click", stopListening);
+clearRollButton.addEventListener("click", clearPitchRoll);
+window.addEventListener("resize", resizePitchRoll);
+pitchRoll.addEventListener("pointerdown", playPianoKeyFromPointer);
+rangeButtons.forEach((button) => button.addEventListener("click", setVocalRange));
+
+resizePitchRoll();
+rollAnimationId = requestAnimationFrame(updatePitchRoll);
+
+async function startListening() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    setStatus("当前浏览器不支持麦克风采集，请换用新版 Chrome / Edge。", true);
+    return;
+  }
+
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+      },
+    });
+
+    audioContext = new AudioContext();
+    analyser = audioContext.createAnalyser();
+    analyser.fftSize = 4096;
+    analyser.smoothingTimeConstant = 0;
+    microphone = audioContext.createMediaStreamSource(mediaStream);
+    microphone.connect(analyser);
+    buffer = new Float32Array(analyser.fftSize);
+
+    startButton.disabled = true;
+    stopButton.disabled = false;
+    setStatus("正在监听。请唱一个稳定的单音。", false);
+    detectPitch();
+  } catch (error) {
+    setStatus(`无法打开麦克风：${error.message}`, true);
+  }
+}
+
+function stopListening() {
+  cancelAnimationFrame(animationId);
+  animationId = undefined;
+  pitchHistory.length = 0;
+
+  if (microphone) {
+    microphone.disconnect();
+    microphone = undefined;
+  }
+
+  if (mediaStream) {
+    mediaStream.getTracks().forEach((track) => track.stop());
+    mediaStream = undefined;
+  }
+
+  if (audioContext) {
+    audioContext.close();
+    audioContext = undefined;
+  }
+
+  startButton.disabled = false;
+  stopButton.disabled = true;
+  resetDisplay();
+  setStatus("已停止监听。", false);
+}
+
+function detectPitch() {
+  analyser.getFloatTimeDomainData(buffer);
+
+  const rms = getRms(buffer);
+  volume.textContent = `${Math.round(rms * 1000)}`;
+
+  if (rms < 0.012) {
+    showNoPitch("音量太小，靠近麦克风或唱得更清楚一点。");
+    animationId = requestAnimationFrame(detectPitch);
+    return;
+  }
+
+  const frequency = autoCorrelate(buffer, audioContext.sampleRate);
+
+  if (frequency === null || frequency < 65 || frequency > 1200) {
+    showNoPitch("暂未检测到稳定音高。请唱单音，减少环境噪声。");
+    animationId = requestAnimationFrame(detectPitch);
+    return;
+  }
+
+  const note = frequencyToNote(frequency);
+  const target = noteToFrequency(note.midi);
+  const cents = 1200 * Math.log2(frequency / target);
+  const centsRounded = Math.round(cents);
+
+  pitchHistory.push(cents);
+  if (pitchHistory.length > 18) pitchHistory.shift();
+  recordPitchPoint(frequency, rms);
+
+  noteName.textContent = note.name;
+  frequencyValue.textContent = frequency.toFixed(1);
+  targetFrequency.textContent = `${target.toFixed(1)} Hz`;
+  centsText.textContent = describeCents(centsRounded);
+  stability.textContent = describeStability(pitchHistory);
+  needle.style.left = `${50 + clamp(cents, -50, 50)}%`;
+  setStatus("正在监听。请保持音量稳定，观察指针是否靠近中心。", false);
+
+  animationId = requestAnimationFrame(detectPitch);
+}
+
+function autoCorrelate(samples, sampleRate) {
+  const size = samples.length;
+  const correlations = new Array(size).fill(0);
+  let bestOffset = -1;
+  let bestCorrelation = 0;
+  let previousCorrelation = 1;
+  let foundCandidate = false;
+
+  for (let offset = 32; offset < size / 2; offset += 1) {
+    let correlation = 0;
+
+    for (let i = 0; i < size / 2; i += 1) {
+      correlation += Math.abs(samples[i] - samples[i + offset]);
+    }
+
+    correlation = 1 - correlation / (size / 2);
+    correlations[offset] = correlation;
+
+    if (correlation > 0.92 && correlation > previousCorrelation) {
+      foundCandidate = true;
+      if (correlation > bestCorrelation) {
+        bestCorrelation = correlation;
+        bestOffset = offset;
+      }
+    } else if (foundCandidate) {
+      const shift = refineOffset(correlations, bestOffset);
+      return sampleRate / (bestOffset + shift);
+    }
+
+    previousCorrelation = correlation;
+  }
+
+  if (bestCorrelation > 0.88 && bestOffset > 0) {
+    return sampleRate / bestOffset;
+  }
+
+  return null;
+}
+
+function refineOffset(correlations, offset) {
+  const before = correlations[offset - 1] ?? correlations[offset];
+  const center = correlations[offset];
+  const after = correlations[offset + 1] ?? correlations[offset];
+  const divisor = before + after - 2 * center;
+
+  if (Math.abs(divisor) < 0.00001) return 0;
+  return (before - after) / (2 * divisor);
+}
+
+function getRms(samples) {
+  let sum = 0;
+
+  for (const sample of samples) {
+    sum += sample * sample;
+  }
+
+  return Math.sqrt(sum / samples.length);
+}
+
+function frequencyToNote(frequency) {
+  const midi = Math.round(69 + 12 * Math.log2(frequency / 440));
+  const octave = Math.floor(midi / 12) - 1;
+  const name = `${noteNames[((midi % 12) + 12) % 12]}${octave}`;
+  return { midi, name };
+}
+
+function noteToFrequency(midi) {
+  return 440 * 2 ** ((midi - 69) / 12);
+}
+
+function describeCents(cents) {
+  if (Math.abs(cents) <= 5) return "非常准，接近标准音中心";
+  if (cents > 0) return `偏高 ${cents} cents`;
+  return `偏低 ${Math.abs(cents)} cents`;
+}
+
+function describeStability(values) {
+  if (values.length < 6) return "采样中";
+
+  const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const variance = values.reduce((sum, value) => sum + (value - average) ** 2, 0) / values.length;
+  const deviation = Math.sqrt(variance);
+
+  if (deviation <= 6) return "很稳定";
+  if (deviation <= 14) return "较稳定";
+  return "波动明显";
+}
+
+function showNoPitch(message) {
+  noteName.textContent = "--";
+  frequencyValue.textContent = "--";
+  targetFrequency.textContent = "-- Hz";
+  centsText.textContent = "--";
+  stability.textContent = "--";
+  needle.style.left = "50%";
+  pitchHistory.length = 0;
+  setStatus(message, false);
+}
+
+function resetDisplay() {
+  noteName.textContent = "--";
+  frequencyValue.textContent = "--";
+  centsText.textContent = "--";
+  targetFrequency.textContent = "-- Hz";
+  stability.textContent = "--";
+  volume.textContent = "--";
+  needle.style.left = "50%";
+}
+
+function recordPitchPoint(frequency, rms) {
+  const midi = 69 + 12 * Math.log2(frequency / 440);
+  const now = performance.now();
+
+  pitchTimeline.push({ midi, frequency, rms, time: now });
+  trimPitchTimeline(now);
+}
+
+function clearPitchRoll() {
+  pitchTimeline.length = 0;
+  drawPitchRoll();
+}
+
+function trimPitchTimeline(now) {
+  while (pitchTimeline.length && pitchTimeline[0].time < now - rollWindowMs) {
+    pitchTimeline.shift();
+  }
+}
+
+function resizePitchRoll() {
+  const ratio = window.devicePixelRatio || 1;
+  const rect = pitchRoll.getBoundingClientRect();
+
+  pitchRoll.width = Math.max(1, Math.floor(rect.width * ratio));
+  pitchRoll.height = Math.max(1, Math.floor(rect.height * ratio));
+  rollContext.setTransform(ratio, 0, 0, ratio, 0, 0);
+  drawPitchRoll();
+}
+
+function updatePitchRoll() {
+  drawPitchRoll();
+  rollAnimationId = requestAnimationFrame(updatePitchRoll);
+}
+
+function drawPitchRoll() {
+  const width = pitchRoll.clientWidth;
+  const height = pitchRoll.clientHeight;
+  const now = performance.now();
+  const keyboardWidth = width < 560 ? 54 : 76;
+  const plotLeft = keyboardWidth;
+  const plotWidth = width - plotLeft;
+  const rowHeight = height / (maxMidi - minMidi + 1);
+
+  lastRollLayout = { keyboardWidth, height };
+  trimPitchTimeline(now);
+  rollContext.clearRect(0, 0, width, height);
+  drawRollBackground(width, height, keyboardWidth, rowHeight);
+  drawTimeGrid(plotLeft, plotWidth, height, now);
+  drawPitchPath(plotLeft, plotWidth, height, now);
+}
+
+function drawRollBackground(width, height, keyboardWidth, rowHeight) {
+  rollContext.fillStyle = "#070910";
+  rollContext.fillRect(0, 0, width, height);
+
+  for (let midi = maxMidi; midi >= minMidi; midi -= 1) {
+    const y = midiToY(midi, height);
+    const noteIndex = ((midi % 12) + 12) % 12;
+    const isBlack = [1, 3, 6, 8, 10].includes(noteIndex);
+    const isC = noteIndex === 0;
+
+    rollContext.fillStyle = isBlack ? "rgba(255, 255, 255, 0.035)" : "rgba(255, 255, 255, 0.07)";
+    rollContext.fillRect(keyboardWidth, y, width - keyboardWidth, rowHeight);
+
+    rollContext.strokeStyle = isC ? "rgba(142, 255, 210, 0.26)" : "rgba(255, 255, 255, 0.055)";
+    rollContext.lineWidth = isC ? 1.5 : 1;
+    rollContext.beginPath();
+    rollContext.moveTo(keyboardWidth, y);
+    rollContext.lineTo(width, y);
+    rollContext.stroke();
+
+    rollContext.fillStyle = isBlack ? "#11131c" : "#eef2ff";
+    rollContext.fillRect(0, y + 1, keyboardWidth - 8, Math.max(1, rowHeight - 2));
+
+    if (isBlack) {
+      rollContext.fillStyle = "#05060a";
+      rollContext.fillRect(0, y + 2, keyboardWidth * 0.64, Math.max(1, rowHeight - 4));
+    }
+
+    if (noteIndex === 0 || noteIndex === 4 || noteIndex === 7) {
+      rollContext.fillStyle = isBlack ? "#f4f7ff" : "#141824";
+      rollContext.font = "700 11px system-ui, sans-serif";
+      rollContext.textAlign = "right";
+      rollContext.textBaseline = "middle";
+      rollContext.fillText(midiToNoteName(midi), keyboardWidth - 14, y + rowHeight / 2);
+    }
+  }
+
+  rollContext.fillStyle = "rgba(255, 255, 255, 0.10)";
+  rollContext.fillRect(keyboardWidth - 8, 0, 1, height);
+}
+
+function drawTimeGrid(plotLeft, plotWidth, height, now) {
+  rollContext.strokeStyle = "rgba(255, 255, 255, 0.075)";
+  rollContext.lineWidth = 1;
+
+  for (let secondsAgo = 0; secondsAgo <= rollWindowMs / 1000; secondsAgo += 2) {
+    const x = plotLeft + plotWidth - (secondsAgo * 1000 / rollWindowMs) * plotWidth;
+    rollContext.beginPath();
+    rollContext.moveTo(x, 0);
+    rollContext.lineTo(x, height);
+    rollContext.stroke();
+  }
+
+  rollContext.fillStyle = "rgba(255, 255, 255, 0.42)";
+  rollContext.font = "700 11px system-ui, sans-serif";
+  rollContext.textAlign = "right";
+  rollContext.textBaseline = "top";
+  rollContext.fillText("now", plotLeft + plotWidth - 10, 10);
+  rollContext.textAlign = "left";
+  rollContext.fillText(`-${Math.round(rollWindowMs / 1000)}s`, plotLeft + 10, 10);
+}
+
+function drawPitchPath(plotLeft, plotWidth, height, now) {
+  const points = pitchTimeline.filter((point) => point.midi >= minMidi && point.midi <= maxMidi);
+
+  if (!points.length) {
+    rollContext.fillStyle = "rgba(255, 255, 255, 0.42)";
+    rollContext.font = "800 18px system-ui, sans-serif";
+    rollContext.textAlign = "center";
+    rollContext.textBaseline = "middle";
+    rollContext.fillText("开始唱歌后，这里会出现音高轨迹", plotLeft + plotWidth / 2, height / 2);
+    return;
+  }
+
+  rollContext.lineCap = "round";
+  rollContext.lineJoin = "round";
+
+  drawPathStroke(points, plotLeft, plotWidth, height, now, "rgba(142, 255, 210, 0.22)", 5);
+  drawPathStroke(points, plotLeft, plotWidth, height, now, "rgba(142, 255, 210, 0.95)", 2);
+
+  const last = points[points.length - 1];
+  const x = timeToX(last.time, plotLeft, plotWidth, now);
+  const y = midiToCenterY(last.midi, height);
+  rollContext.fillStyle = "#ffffff";
+  rollContext.beginPath();
+  rollContext.arc(x, y, 3.5, 0, Math.PI * 2);
+  rollContext.fill();
+  drawLivePitchLabel(last, x, y, plotLeft, plotWidth, height);
+}
+
+function drawLivePitchLabel(point, x, y, plotLeft, plotWidth, height) {
+  rollContext.font = "800 12px system-ui, sans-serif";
+
+  const label = midiToNoteName(Math.round(point.midi));
+  const paddingX = 8;
+  const boxHeight = 24;
+  const boxWidth = rollContext.measureText(label).width + paddingX * 2;
+  const labelX = clamp(x + 10, plotLeft + 6, plotLeft + plotWidth - boxWidth - 8);
+  const labelY = clamp(y - boxHeight - 8, 8, height - boxHeight - 8);
+
+  rollContext.fillStyle = "rgba(7, 9, 16, 0.86)";
+  rollContext.fillRect(labelX, labelY, boxWidth, boxHeight);
+  rollContext.strokeStyle = "rgba(142, 255, 210, 0.78)";
+  rollContext.lineWidth = 1;
+  rollContext.strokeRect(labelX, labelY, boxWidth, boxHeight);
+  rollContext.fillStyle = "#eafff7";
+  rollContext.textAlign = "left";
+  rollContext.textBaseline = "middle";
+  rollContext.fillText(label, labelX + paddingX, labelY + boxHeight / 2);
+}
+
+function drawPathStroke(points, plotLeft, plotWidth, height, now, color, lineWidth) {
+  rollContext.strokeStyle = color;
+  rollContext.lineWidth = lineWidth;
+  rollContext.beginPath();
+
+  let previous;
+
+  for (const point of points) {
+    const x = timeToX(point.time, plotLeft, plotWidth, now);
+    const y = midiToCenterY(point.midi, height);
+
+    if (!previous || point.time - previous.time > 350) {
+      rollContext.moveTo(x, y);
+    } else {
+      rollContext.lineTo(x, y);
+    }
+
+    previous = point;
+  }
+
+  rollContext.stroke();
+}
+
+function timeToX(time, plotLeft, plotWidth, now) {
+  return plotLeft + ((time - (now - rollWindowMs)) / rollWindowMs) * plotWidth;
+}
+
+function midiToY(midi, height) {
+  const position = (maxMidi - midi) / (maxMidi - minMidi + 1);
+  return position * height;
+}
+
+function midiToCenterY(midi, height) {
+  const position = (maxMidi - midi + 0.5) / (maxMidi - minMidi + 1);
+  return position * height;
+}
+
+function midiToNoteName(midi) {
+  const octave = Math.floor(midi / 12) - 1;
+  return `${noteNames[((midi % 12) + 12) % 12]}${octave}`;
+}
+
+function setVocalRange(event) {
+  const range = vocalRanges[event.currentTarget.dataset.range];
+  if (!range) return;
+
+  minMidi = range.min;
+  maxMidi = range.max;
+  rangeButtons.forEach((button) => button.classList.toggle("active", button === event.currentTarget));
+  drawPitchRoll();
+}
+
+function playPianoKeyFromPointer(event) {
+  const rect = pitchRoll.getBoundingClientRect();
+  const x = event.clientX - rect.left;
+  const y = event.clientY - rect.top;
+
+  if (x > lastRollLayout.keyboardWidth - 8) return;
+
+  const midi = yToMidi(y, lastRollLayout.height);
+  playReferenceNote(midi);
+  setStatus(`参考音：${midiToNoteName(midi)} ${noteToFrequency(midi).toFixed(1)} Hz`, false);
+}
+
+function yToMidi(y, height) {
+  const rowHeight = height / (maxMidi - minMidi + 1);
+  const indexFromTop = clamp(Math.floor(y / rowHeight), 0, maxMidi - minMidi);
+  return maxMidi - indexFromTop;
+}
+
+function playReferenceNote(midi) {
+  referenceAudioContext ??= new AudioContext();
+  if (referenceAudioContext.state === "suspended") {
+    referenceAudioContext.resume();
+  }
+
+  const oscillator = referenceAudioContext.createOscillator();
+  const gain = referenceAudioContext.createGain();
+  const now = referenceAudioContext.currentTime;
+
+  oscillator.type = "sine";
+  oscillator.frequency.setValueAtTime(noteToFrequency(midi), now);
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.18, now + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.62);
+  oscillator.connect(gain);
+  gain.connect(referenceAudioContext.destination);
+  oscillator.start(now);
+  oscillator.stop(now + 0.65);
+}
+
+function setStatus(message, isError) {
+  statusText.textContent = message;
+  statusText.style.color = isError ? "var(--bad)" : "var(--muted)";
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
