@@ -44,6 +44,26 @@ const CENTS_SMOOTH = 0.2;
 const VOLUME_THRESHOLD = 0.006;
 const HOLD_MS = 350;
 
+function getThemeColor(varName) {
+  return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+}
+
+function getCanvasColors() {
+  return {
+    bg: getThemeColor("--roll-bg") || "#070910",
+    grid: getThemeColor("--roll-grid") || "rgba(255,255,255,0.055)",
+    cGrid: getThemeColor("--roll-c-grid") || "rgba(142,255,210,0.26)",
+    keyLight: getThemeColor("--roll-key-light") || "#eef2ff",
+    keyDark: getThemeColor("--roll-key-dark") || "#11131c",
+    keyBlack: getThemeColor("--roll-key-black") || "#05060a",
+    labelLight: getThemeColor("--roll-label-light") || "#141824",
+    labelDark: getThemeColor("--roll-label-dark") || "#f4f7ff",
+    text: getThemeColor("--roll-text") || "rgba(255,255,255,0.42)",
+    border: getThemeColor("--roll-border") || "rgba(255,255,255,0.10)",
+    accent: getThemeColor("--accent") || "#8effd2",
+  };
+}
+
 startButton.addEventListener("click", startListening);
 stopButton.addEventListener("click", stopListening);
 clearRollButton.addEventListener("click", clearPitchRoll);
@@ -345,7 +365,8 @@ function drawPitchRoll() {
 }
 
 function drawRollBackground(width, height, keyboardWidth, rowHeight) {
-  rollContext.fillStyle = "#070910";
+  const c = getCanvasColors();
+  rollContext.fillStyle = c.bg;
   rollContext.fillRect(0, 0, width, height);
 
   for (let midi = maxMidi; midi >= minMidi; midi -= 1) {
@@ -354,26 +375,26 @@ function drawRollBackground(width, height, keyboardWidth, rowHeight) {
     const isBlack = [1, 3, 6, 8, 10].includes(noteIndex);
     const isC = noteIndex === 0;
 
-    rollContext.fillStyle = isBlack ? "rgba(255, 255, 255, 0.035)" : "rgba(255, 255, 255, 0.07)";
+    rollContext.fillStyle = isBlack ? "rgba(128,128,128,0.06)" : "rgba(128,128,128,0.12)";
     rollContext.fillRect(keyboardWidth, y, width - keyboardWidth, rowHeight);
 
-    rollContext.strokeStyle = isC ? "rgba(142, 255, 210, 0.26)" : "rgba(255, 255, 255, 0.055)";
+    rollContext.strokeStyle = isC ? c.cGrid : c.grid;
     rollContext.lineWidth = isC ? 1.5 : 1;
     rollContext.beginPath();
     rollContext.moveTo(keyboardWidth, y);
     rollContext.lineTo(width, y);
     rollContext.stroke();
 
-    rollContext.fillStyle = isBlack ? "#11131c" : "#eef2ff";
+    rollContext.fillStyle = isBlack ? c.keyDark : c.keyLight;
     rollContext.fillRect(0, y + 1, keyboardWidth - 8, Math.max(1, rowHeight - 2));
 
     if (isBlack) {
-      rollContext.fillStyle = "#05060a";
+      rollContext.fillStyle = c.keyBlack;
       rollContext.fillRect(0, y + 2, keyboardWidth * 0.64, Math.max(1, rowHeight - 4));
     }
 
     if (noteIndex === 0 || noteIndex === 4 || noteIndex === 7) {
-      rollContext.fillStyle = isBlack ? "#f4f7ff" : "#141824";
+      rollContext.fillStyle = isBlack ? c.labelDark : c.labelLight;
       rollContext.font = "700 11px system-ui, sans-serif";
       rollContext.textAlign = "right";
       rollContext.textBaseline = "middle";
@@ -381,12 +402,13 @@ function drawRollBackground(width, height, keyboardWidth, rowHeight) {
     }
   }
 
-  rollContext.fillStyle = "rgba(255, 255, 255, 0.10)";
+  rollContext.fillStyle = c.border;
   rollContext.fillRect(keyboardWidth - 8, 0, 1, height);
 }
 
 function drawTimeGrid(plotLeft, plotWidth, height, now) {
-  rollContext.strokeStyle = "rgba(255, 255, 255, 0.075)";
+  const c = getCanvasColors();
+  rollContext.strokeStyle = c.grid;
   rollContext.lineWidth = 1;
 
   for (let secondsAgo = 0; secondsAgo <= rollWindowMs / 1000; secondsAgo += 2) {
@@ -397,7 +419,7 @@ function drawTimeGrid(plotLeft, plotWidth, height, now) {
     rollContext.stroke();
   }
 
-  rollContext.fillStyle = "rgba(255, 255, 255, 0.42)";
+  rollContext.fillStyle = c.text;
   rollContext.font = "700 11px system-ui, sans-serif";
   rollContext.textAlign = "right";
   rollContext.textBaseline = "top";
@@ -407,10 +429,11 @@ function drawTimeGrid(plotLeft, plotWidth, height, now) {
 }
 
 function drawPitchPath(plotLeft, plotWidth, height, now) {
+  const c = getCanvasColors();
   const points = pitchTimeline.filter((point) => point.midi >= minMidi && point.midi <= maxMidi);
 
   if (!points.length) {
-    rollContext.fillStyle = "rgba(255, 255, 255, 0.42)";
+    rollContext.fillStyle = c.text;
     rollContext.font = "800 18px system-ui, sans-serif";
     rollContext.textAlign = "center";
     rollContext.textBaseline = "middle";
@@ -421,20 +444,20 @@ function drawPitchPath(plotLeft, plotWidth, height, now) {
   rollContext.lineCap = "round";
   rollContext.lineJoin = "round";
 
-  drawPathStroke(points, plotLeft, plotWidth, height, now, "rgba(142, 255, 210, 0.22)", 5);
-  drawPathStroke(points, plotLeft, plotWidth, height, now, "rgba(142, 255, 210, 0.95)", 2);
+  drawPathStroke(points, plotLeft, plotWidth, height, now, c.accent + "38", 5);
+  drawPathStroke(points, plotLeft, plotWidth, height, now, c.accent + "f2", 2);
 
   const last = points[points.length - 1];
   const x = timeToX(last.time, plotLeft, plotWidth, now);
   const y = midiToCenterY(last.midi, height);
-  rollContext.fillStyle = "#ffffff";
+  rollContext.fillStyle = c.accent;
   rollContext.beginPath();
   rollContext.arc(x, y, 3.5, 0, Math.PI * 2);
   rollContext.fill();
-  drawLivePitchLabel(last, x, y, plotLeft, plotWidth, height);
+  drawLivePitchLabel(last, x, y, plotLeft, plotWidth, height, c);
 }
 
-function drawLivePitchLabel(point, x, y, plotLeft, plotWidth, height) {
+function drawLivePitchLabel(point, x, y, plotLeft, plotWidth, height, c) {
   rollContext.font = "800 12px system-ui, sans-serif";
 
   const label = midiToNoteName(Math.round(point.midi));
@@ -444,12 +467,14 @@ function drawLivePitchLabel(point, x, y, plotLeft, plotWidth, height) {
   const labelX = clamp(x + 10, plotLeft + 6, plotLeft + plotWidth - boxWidth - 8);
   const labelY = clamp(y - boxHeight - 8, 8, height - boxHeight - 8);
 
-  rollContext.fillStyle = "rgba(7, 9, 16, 0.86)";
+  rollContext.fillStyle = c.bg;
+  rollContext.globalAlpha = 0.88;
   rollContext.fillRect(labelX, labelY, boxWidth, boxHeight);
-  rollContext.strokeStyle = "rgba(142, 255, 210, 0.78)";
+  rollContext.globalAlpha = 1;
+  rollContext.strokeStyle = c.accent;
   rollContext.lineWidth = 1;
   rollContext.strokeRect(labelX, labelY, boxWidth, boxHeight);
-  rollContext.fillStyle = "#eafff7";
+  rollContext.fillStyle = c.accent;
   rollContext.textAlign = "left";
   rollContext.textBaseline = "middle";
   rollContext.fillText(label, labelX + paddingX, labelY + boxHeight / 2);
@@ -569,3 +594,23 @@ const revealObserver = new IntersectionObserver(
 );
 
 document.querySelectorAll(".reveal").forEach((el) => revealObserver.observe(el));
+
+/* ─── Theme Toggle ─── */
+const themeToggle = document.querySelector("#themeToggle");
+const themeIcon = themeToggle.querySelector(".theme-icon");
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  themeIcon.textContent = theme === "light" ? "☀" : "☽";
+  localStorage.setItem("theme", theme);
+}
+
+themeToggle.addEventListener("click", () => {
+  const current = document.documentElement.getAttribute("data-theme");
+  applyTheme(current === "light" ? "dark" : "light");
+});
+
+const savedTheme = localStorage.getItem("theme");
+if (savedTheme) {
+  applyTheme(savedTheme);
+}
