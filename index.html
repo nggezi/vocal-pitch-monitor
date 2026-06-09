@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vocal Studio</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='45' fill='%238effd2'/><text y='.9em' x='50' text-anchor='middle' font-size='65'>♪</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+  <div class="glow glow-1" aria-hidden="true"></div>
+  <div class="glow glow-2" aria-hidden="true"></div>
+
+  <button id="themeToggle" class="theme-btn" aria-label="切换主题">
+    <svg class="icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+    <svg class="icon-moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+  </button>
+
+  <div class="layout">
+    <!-- Left: Tuner Panel -->
+    <aside class="tuner-panel" aria-live="polite">
+      <div class="tuner-shell">
+        <div class="tuner-core">
+          <div class="tuner-head">
+            <span class="tag">TUNER</span>
+            <div class="freq-display">
+              <span id="noteName" class="note-glyph">--</span>
+              <span id="frequencyValue" class="freq-num">--</span>
+              <span class="freq-unit">Hz</span>
+            </div>
+          </div>
+
+          <div class="meter">
+            <div class="meter-scale">
+              <span>-50</span>
+              <span>0</span>
+              <span>+50</span>
+            </div>
+            <div class="meter-track">
+              <div class="meter-center"></div>
+              <div id="needle" class="meter-needle"></div>
+            </div>
+            <p id="centsText" class="meter-reading">--</p>
+          </div>
+
+          <div class="stat-grid">
+            <div class="stat">
+              <span class="stat-label">标准音</span>
+              <strong id="targetFrequency">-- Hz</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">稳定性</span>
+              <strong id="stability">--</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">音量</span>
+              <strong id="volume">--</strong>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Right: Main Content -->
+    <div class="main-content">
+      <!-- Hero -->
+      <header class="hero">
+        <span class="tag">VOCAL STUDIO</span>
+        <h1>实时练唱<br>音高监测</h1>
+        <p class="hero-desc">打开麦克风唱一句旋律。页面会实时显示当前音高，并像 Auto-Tune 的钢琴窗一样记录最近一段时间的音高轨迹。</p>
+        <div class="hero-actions">
+          <button id="startButton" class="cta">
+            <span>开始监听</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </button>
+          <button id="stopButton" class="cta cta-ghost" disabled>停止</button>
+        </div>
+        <p id="status" class="status-text">等待开始。建议使用 Chrome / Edge。</p>
+      </header>
+
+      <!-- Piano Roll -->
+      <section class="roll-section">
+        <div class="roll-shell">
+          <div class="roll-core">
+            <div class="roll-header">
+              <div>
+                <span class="tag">PITCH TIMELINE</span>
+                <h2>钢琴窗音高轨迹</h2>
+              </div>
+              <button id="clearRollButton" class="cta cta-ghost cta-sm">清空</button>
+            </div>
+
+            <div class="range-row">
+              <span class="range-label">音域</span>
+              <div class="range-group">
+                <button class="pill" data-range="bass">男低</button>
+                <button class="pill active" data-range="tenor">男高</button>
+                <button class="pill" data-range="alto">女低</button>
+                <button class="pill" data-range="soprano">女高</button>
+                <button class="pill" data-range="wide">宽</button>
+              </div>
+            </div>
+
+            <div class="canvas-shell">
+              <canvas id="pitchRoll"></canvas>
+            </div>
+
+            <p class="roll-hint">点击左侧琴键播放参考音 · 线条越平越稳</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tips -->
+      <section class="tips-section">
+        <div class="tips-shell">
+          <div class="tips-core">
+            <h2>练习建议</h2>
+            <div class="tips-grid">
+              <div class="tip-card">
+                <span class="tip-num">01</span>
+                <p>唱完整一句后，观察轨迹是否贴近目标音高的横线。</p>
+              </div>
+              <div class="tip-card">
+                <span class="tip-num">02</span>
+                <p>先唱持续 2-4 秒的单音，不加颤音，观察线条是否水平稳定。</p>
+              </div>
+              <div class="tip-card">
+                <span class="tip-num">03</span>
+                <p>偏差在 ±10 cents 内通常已经很准；初练可以先追求 ±25 cents 内。</p>
+              </div>
+              <div class="tip-card">
+                <span class="tip-num">04</span>
+                <p>网页端检测适合练习参考，不等同于专业录音棚校准设备。</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <footer class="foot">
+        <span>nggezi</span>
+        <span class="ver">v1.0</span>
+        <a href="https://github.com/nggezi" target="_blank" rel="noopener">GitHub</a>
+      </footer>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
