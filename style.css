@@ -117,9 +117,8 @@ button:disabled {
 
 @media (min-width: 1180px) {
   .app {
-    width: min(980px, calc(100% - 330px));
-    margin-left: 300px;
-    margin-right: 24px;
+    width: min(980px, calc(100vw - 340px));
+    margin-left: calc((100vw - min(980px, 100vw - 340px) + 260px) / 2);
   }
 
   .meter-card {

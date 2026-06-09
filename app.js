@@ -36,6 +36,13 @@ let buffer;
 let minMidi = vocalRanges.tenor.min;
 let maxMidi = vocalRanges.tenor.max;
 let lastRollLayout = { keyboardWidth: 76, height: 430 };
+let smoothedFrequency = null;
+let smoothedCents = null;
+let lastPitchTime = 0;
+const SMOOTH_FACTOR = 0.15;
+const CENTS_SMOOTH = 0.2;
+const VOLUME_THRESHOLD = 0.006;
+const HOLD_MS = 350;
 
 startButton.addEventListener("click", startListening);
 stopButton.addEventListener("click", stopListening);
@@ -83,6 +90,8 @@ function stopListening() {
   cancelAnimationFrame(animationId);
   animationId = undefined;
   pitchHistory.length = 0;
+  smoothedFrequency = null;
+  smoothedCents = null;
 
   if (microphone) {
     microphone.disconnect();
@@ -110,88 +119,114 @@ function detectPitch() {
 
   const rms = getRms(buffer);
   volume.textContent = `${Math.round(rms * 1000)}`;
+  const now = performance.now();
 
-  if (rms < 0.012) {
-    showNoPitch("音量太小，靠近麦克风或唱得更清楚一点。");
-    animationId = requestAnimationFrame(detectPitch);
-    return;
+  const rawFrequency = yinDetect(buffer, audioContext.sampleRate);
+
+  const hasVoice = rawFrequency !== null && rawFrequency >= 65 && rawFrequency <= 1200 && rms >= VOLUME_THRESHOLD;
+
+  if (hasVoice) {
+    lastPitchTime = now;
+
+    // Jump filter: reject if jump > 4 semitones from last stable pitch
+    if (smoothedFrequency !== null) {
+      const jumpCents = Math.abs(1200 * Math.log2(rawFrequency / smoothedFrequency));
+      if (jumpCents > 400) {
+        animationId = requestAnimationFrame(detectPitch);
+        return;
+      }
+    }
+
+    if (smoothedFrequency === null) {
+      smoothedFrequency = rawFrequency;
+    } else {
+      smoothedFrequency = smoothedFrequency + SMOOTH_FACTOR * (rawFrequency - smoothedFrequency);
+    }
+
+    const note = frequencyToNote(smoothedFrequency);
+    const target = noteToFrequency(note.midi);
+    const cents = 1200 * Math.log2(smoothedFrequency / target);
+
+    if (smoothedCents === null) {
+      smoothedCents = cents;
+    } else {
+      smoothedCents = smoothedCents + CENTS_SMOOTH * (cents - smoothedCents);
+    }
+
+    const centsRounded = Math.round(smoothedCents);
+
+    pitchHistory.push(cents);
+    if (pitchHistory.length > 18) pitchHistory.shift();
+    recordPitchPoint(smoothedFrequency, rms);
+
+    noteName.textContent = note.name;
+    frequencyValue.textContent = smoothedFrequency.toFixed(1);
+    targetFrequency.textContent = `${target.toFixed(1)} Hz`;
+    centsText.textContent = describeCents(centsRounded);
+    stability.textContent = describeStability(pitchHistory);
+    needle.style.left = `${50 + clamp(smoothedCents, -50, 50)}%`;
+    setStatus("正在监听。请保持音量稳定，观察指针是否靠近中心。", false);
+
+  } else if (smoothedFrequency !== null && now - lastPitchTime < HOLD_MS) {
+    // Hold: keep drawing last pitch briefly during soft passages
+    recordPitchPoint(smoothedFrequency, rms);
+
+  } else {
+    showNoPitch(rms < VOLUME_THRESHOLD ? "音量太小，靠近麦克风或唱得更清楚一点。" : "暂未检测到稳定音高。请唱单音，减少环境噪声。");
+    smoothedFrequency = null;
+    smoothedCents = null;
   }
-
-  const frequency = autoCorrelate(buffer, audioContext.sampleRate);
-
-  if (frequency === null || frequency < 65 || frequency > 1200) {
-    showNoPitch("暂未检测到稳定音高。请唱单音，减少环境噪声。");
-    animationId = requestAnimationFrame(detectPitch);
-    return;
-  }
-
-  const note = frequencyToNote(frequency);
-  const target = noteToFrequency(note.midi);
-  const cents = 1200 * Math.log2(frequency / target);
-  const centsRounded = Math.round(cents);
-
-  pitchHistory.push(cents);
-  if (pitchHistory.length > 18) pitchHistory.shift();
-  recordPitchPoint(frequency, rms);
-
-  noteName.textContent = note.name;
-  frequencyValue.textContent = frequency.toFixed(1);
-  targetFrequency.textContent = `${target.toFixed(1)} Hz`;
-  centsText.textContent = describeCents(centsRounded);
-  stability.textContent = describeStability(pitchHistory);
-  needle.style.left = `${50 + clamp(cents, -50, 50)}%`;
-  setStatus("正在监听。请保持音量稳定，观察指针是否靠近中心。", false);
 
   animationId = requestAnimationFrame(detectPitch);
 }
 
-function autoCorrelate(samples, sampleRate) {
-  const size = samples.length;
-  const correlations = new Array(size).fill(0);
-  let bestOffset = -1;
-  let bestCorrelation = 0;
-  let previousCorrelation = 1;
-  let foundCandidate = false;
+function yinDetect(samples, sampleRate) {
+  const halfLen = Math.floor(samples.length / 2);
+  const yinBuffer = new Float32Array(halfLen);
 
-  for (let offset = 32; offset < size / 2; offset += 1) {
-    let correlation = 0;
-
-    for (let i = 0; i < size / 2; i += 1) {
-      correlation += Math.abs(samples[i] - samples[i + offset]);
+  // Step 1: Difference function
+  for (let tau = 0; tau < halfLen; tau++) {
+    let sum = 0;
+    for (let i = 0; i < halfLen; i++) {
+      const delta = samples[i] - samples[i + tau];
+      sum += delta * delta;
     }
+    yinBuffer[tau] = sum;
+  }
 
-    correlation = 1 - correlation / (size / 2);
-    correlations[offset] = correlation;
+  // Step 2: Cumulative mean normalized difference
+  yinBuffer[0] = 1;
+  let runningSum = 0;
+  for (let tau = 1; tau < halfLen; tau++) {
+    runningSum += yinBuffer[tau];
+    yinBuffer[tau] = yinBuffer[tau] * tau / runningSum;
+  }
 
-    if (correlation > 0.92 && correlation > previousCorrelation) {
-      foundCandidate = true;
-      if (correlation > bestCorrelation) {
-        bestCorrelation = correlation;
-        bestOffset = offset;
+  // Step 3: First dip below threshold
+  const threshold = 0.15;
+  let tauEstimate = -1;
+
+  for (let tau = 2; tau < halfLen; tau++) {
+    if (yinBuffer[tau] < threshold) {
+      // Find the valley
+      while (tau + 1 < halfLen && yinBuffer[tau + 1] < yinBuffer[tau]) {
+        tau++;
       }
-    } else if (foundCandidate) {
-      const shift = refineOffset(correlations, bestOffset);
-      return sampleRate / (bestOffset + shift);
+      tauEstimate = tau;
+      break;
     }
-
-    previousCorrelation = correlation;
   }
 
-  if (bestCorrelation > 0.88 && bestOffset > 0) {
-    return sampleRate / bestOffset;
-  }
+  if (tauEstimate === -1) return null;
 
-  return null;
-}
+  // Step 4: Parabolic interpolation
+  const s0 = yinBuffer[tauEstimate - 1];
+  const s1 = yinBuffer[tauEstimate];
+  const s2 = yinBuffer[tauEstimate + 1] ?? s1;
+  const shift = (s0 - s2) / (2 * (s0 - 2 * s1 + s2));
+  const period = tauEstimate + (isNaN(shift) ? 0 : shift);
 
-function refineOffset(correlations, offset) {
-  const before = correlations[offset - 1] ?? correlations[offset];
-  const center = correlations[offset];
-  const after = correlations[offset + 1] ?? correlations[offset];
-  const divisor = before + after - 2 * center;
-
-  if (Math.abs(divisor) < 0.00001) return 0;
-  return (before - after) / (2 * divisor);
+  return sampleRate / period;
 }
 
 function getRms(samples) {
@@ -241,6 +276,8 @@ function showNoPitch(message) {
   stability.textContent = "--";
   needle.style.left = "50%";
   pitchHistory.length = 0;
+  smoothedFrequency = null;
+  smoothedCents = null;
   setStatus(message, false);
 }
 
@@ -252,6 +289,8 @@ function resetDisplay() {
   stability.textContent = "--";
   volume.textContent = "--";
   needle.style.left = "50%";
+  smoothedFrequency = null;
+  smoothedCents = null;
 }
 
 function recordPitchPoint(frequency, rms) {
