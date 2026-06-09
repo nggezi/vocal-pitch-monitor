@@ -76,7 +76,7 @@ rollAnimationId = requestAnimationFrame(updatePitchRoll);
 
 async function startListening() {
   if (!navigator.mediaDevices?.getUserMedia) {
-    setStatus("当前浏览器不支持麦克风采集，请换用新版 Chrome / Edge。", true);
+    setStatus("当前浏览器不支持麦克风，请换用新版 Chrome / Edge。", true);
     return;
   }
 
@@ -102,7 +102,7 @@ async function startListening() {
     setStatus("正在监听。请唱一个稳定的单音。", false);
     detectPitch();
   } catch (error) {
-    setStatus(`无法打开麦克风：${error.message}`, true);
+    setStatus("无法打开麦克风：" + error.message, true);
   }
 }
 
@@ -138,7 +138,7 @@ function detectPitch() {
   analyser.getFloatTimeDomainData(buffer);
 
   const rms = getRms(buffer);
-  volume.textContent = `${Math.round(rms * 1000)}`;
+  volume.textContent = Math.round(rms * 1000);
   const now = performance.now();
 
   const rawFrequency = yinDetect(buffer, audioContext.sampleRate);
@@ -148,7 +148,6 @@ function detectPitch() {
   if (hasVoice) {
     lastPitchTime = now;
 
-    // Jump filter: reject if jump > 4 semitones from last stable pitch
     if (smoothedFrequency !== null) {
       const jumpCents = Math.abs(1200 * Math.log2(rawFrequency / smoothedFrequency));
       if (jumpCents > 400) {
@@ -181,18 +180,17 @@ function detectPitch() {
 
     noteName.textContent = note.name;
     frequencyValue.textContent = smoothedFrequency.toFixed(1);
-    targetFrequency.textContent = `${target.toFixed(1)} Hz`;
+    targetFrequency.textContent = target.toFixed(1) + " Hz";
     centsText.textContent = describeCents(centsRounded);
     stability.textContent = describeStability(pitchHistory);
-    needle.style.left = `${50 + clamp(smoothedCents, -50, 50)}%`;
-    setStatus("正在监听。请保持音量稳定，观察指针是否靠近中心。", false);
+    needle.style.left = (50 + clamp(smoothedCents, -50, 50)) + "%";
+    setStatus("正在监听。请保持音量稳定。", false);
 
   } else if (smoothedFrequency !== null && now - lastPitchTime < HOLD_MS) {
-    // Hold: keep drawing last pitch briefly during soft passages
     recordPitchPoint(smoothedFrequency, rms);
 
   } else {
-    showNoPitch(rms < VOLUME_THRESHOLD ? "音量太小，靠近麦克风或唱得更清楚一点。" : "暂未检测到稳定音高。请唱单音，减少环境噪声。");
+    showNoPitch(rms < VOLUME_THRESHOLD ? "音量太小，请靠近麦克风。" : "暂未检测到稳定音高。");
     smoothedFrequency = null;
     smoothedCents = null;
   }
@@ -204,7 +202,6 @@ function yinDetect(samples, sampleRate) {
   const halfLen = Math.floor(samples.length / 2);
   const yinBuffer = new Float32Array(halfLen);
 
-  // Step 1: Difference function
   for (let tau = 0; tau < halfLen; tau++) {
     let sum = 0;
     for (let i = 0; i < halfLen; i++) {
@@ -214,7 +211,6 @@ function yinDetect(samples, sampleRate) {
     yinBuffer[tau] = sum;
   }
 
-  // Step 2: Cumulative mean normalized difference
   yinBuffer[0] = 1;
   let runningSum = 0;
   for (let tau = 1; tau < halfLen; tau++) {
@@ -222,13 +218,11 @@ function yinDetect(samples, sampleRate) {
     yinBuffer[tau] = yinBuffer[tau] * tau / runningSum;
   }
 
-  // Step 3: First dip below threshold
   const threshold = 0.15;
   let tauEstimate = -1;
 
   for (let tau = 2; tau < halfLen; tau++) {
     if (yinBuffer[tau] < threshold) {
-      // Find the valley
       while (tau + 1 < halfLen && yinBuffer[tau + 1] < yinBuffer[tau]) {
         tau++;
       }
@@ -239,7 +233,6 @@ function yinDetect(samples, sampleRate) {
 
   if (tauEstimate === -1) return null;
 
-  // Step 4: Parabolic interpolation
   const s0 = yinBuffer[tauEstimate - 1];
   const s1 = yinBuffer[tauEstimate];
   const s2 = yinBuffer[tauEstimate + 1] ?? s1;
@@ -251,38 +244,34 @@ function yinDetect(samples, sampleRate) {
 
 function getRms(samples) {
   let sum = 0;
-
   for (const sample of samples) {
     sum += sample * sample;
   }
-
   return Math.sqrt(sum / samples.length);
 }
 
 function frequencyToNote(frequency) {
   const midi = Math.round(69 + 12 * Math.log2(frequency / 440));
   const octave = Math.floor(midi / 12) - 1;
-  const name = `${noteNames[((midi % 12) + 12) % 12]}${octave}`;
+  const name = noteNames[((midi % 12) + 12) % 12] + octave;
   return { midi, name };
 }
 
 function noteToFrequency(midi) {
-  return 440 * 2 ** ((midi - 69) / 12);
+  return 440 * Math.pow(2, (midi - 69) / 12);
 }
 
 function describeCents(cents) {
-  if (Math.abs(cents) <= 5) return "非常准，接近标准音中心";
-  if (cents > 0) return `偏高 ${cents} cents`;
-  return `偏低 ${Math.abs(cents)} cents`;
+  if (Math.abs(cents) <= 5) return "非常准";
+  if (cents > 0) return "偏高 " + cents + " cents";
+  return "偏低 " + Math.abs(cents) + " cents";
 }
 
 function describeStability(values) {
   if (values.length < 6) return "采样中";
-
   const average = values.reduce((sum, value) => sum + value, 0) / values.length;
-  const variance = values.reduce((sum, value) => sum + (value - average) ** 2, 0) / values.length;
+  const variance = values.reduce((sum, value) => sum + Math.pow(value - average, 2), 0) / values.length;
   const deviation = Math.sqrt(variance);
-
   if (deviation <= 6) return "很稳定";
   if (deviation <= 14) return "较稳定";
   return "波动明显";
@@ -316,7 +305,6 @@ function resetDisplay() {
 function recordPitchPoint(frequency, rms) {
   const midi = 69 + 12 * Math.log2(frequency / 440);
   const now = performance.now();
-
   pitchTimeline.push({ midi, frequency, rms, time: now });
   trimPitchTimeline(now);
 }
@@ -335,7 +323,6 @@ function trimPitchTimeline(now) {
 function resizePitchRoll() {
   const ratio = window.devicePixelRatio || 1;
   const rect = pitchRoll.getBoundingClientRect();
-
   pitchRoll.width = Math.max(1, Math.floor(rect.width * ratio));
   pitchRoll.height = Math.max(1, Math.floor(rect.height * ratio));
   rollContext.setTransform(ratio, 0, 0, ratio, 0, 0);
@@ -425,7 +412,7 @@ function drawTimeGrid(plotLeft, plotWidth, height, now) {
   rollContext.textBaseline = "top";
   rollContext.fillText("now", plotLeft + plotWidth - 10, 10);
   rollContext.textAlign = "left";
-  rollContext.fillText(`-${Math.round(rollWindowMs / 1000)}s`, plotLeft + 10, 10);
+  rollContext.fillText("-" + Math.round(rollWindowMs / 1000) + "s", plotLeft + 10, 10);
 }
 
 function drawPitchPath(plotLeft, plotWidth, height, now) {
@@ -459,7 +446,6 @@ function drawPitchPath(plotLeft, plotWidth, height, now) {
 
 function drawLivePitchLabel(point, x, y, plotLeft, plotWidth, height, c) {
   rollContext.font = "800 12px system-ui, sans-serif";
-
   const label = midiToNoteName(Math.round(point.midi));
   const paddingX = 8;
   const boxHeight = 24;
@@ -484,22 +470,17 @@ function drawPathStroke(points, plotLeft, plotWidth, height, now, color, lineWid
   rollContext.strokeStyle = color;
   rollContext.lineWidth = lineWidth;
   rollContext.beginPath();
-
   let previous;
-
   for (const point of points) {
     const x = timeToX(point.time, plotLeft, plotWidth, now);
     const y = midiToCenterY(point.midi, height);
-
     if (!previous || point.time - previous.time > 350) {
       rollContext.moveTo(x, y);
     } else {
       rollContext.lineTo(x, y);
     }
-
     previous = point;
   }
-
   rollContext.stroke();
 }
 
@@ -508,24 +489,21 @@ function timeToX(time, plotLeft, plotWidth, now) {
 }
 
 function midiToY(midi, height) {
-  const position = (maxMidi - midi) / (maxMidi - minMidi + 1);
-  return position * height;
+  return ((maxMidi - midi) / (maxMidi - minMidi + 1)) * height;
 }
 
 function midiToCenterY(midi, height) {
-  const position = (maxMidi - midi + 0.5) / (maxMidi - minMidi + 1);
-  return position * height;
+  return ((maxMidi - midi + 0.5) / (maxMidi - minMidi + 1)) * height;
 }
 
 function midiToNoteName(midi) {
   const octave = Math.floor(midi / 12) - 1;
-  return `${noteNames[((midi % 12) + 12) % 12]}${octave}`;
+  return noteNames[((midi % 12) + 12) % 12] + octave;
 }
 
 function setVocalRange(event) {
   const range = vocalRanges[event.currentTarget.dataset.range];
   if (!range) return;
-
   minMidi = range.min;
   maxMidi = range.max;
   rangeButtons.forEach((button) => button.classList.toggle("active", button === event.currentTarget));
@@ -536,12 +514,10 @@ function playPianoKeyFromPointer(event) {
   const rect = pitchRoll.getBoundingClientRect();
   const x = event.clientX - rect.left;
   const y = event.clientY - rect.top;
-
   if (x > lastRollLayout.keyboardWidth - 8) return;
-
   const midi = yToMidi(y, lastRollLayout.height);
   playReferenceNote(midi);
-  setStatus(`参考音：${midiToNoteName(midi)} ${noteToFrequency(midi).toFixed(1)} Hz`, false);
+  setStatus("参考音：" + midiToNoteName(midi) + " " + noteToFrequency(midi).toFixed(1) + " Hz", false);
 }
 
 function yToMidi(y, height) {
@@ -551,15 +527,13 @@ function yToMidi(y, height) {
 }
 
 function playReferenceNote(midi) {
-  referenceAudioContext ??= new AudioContext();
+  referenceAudioContext = referenceAudioContext || new AudioContext();
   if (referenceAudioContext.state === "suspended") {
     referenceAudioContext.resume();
   }
-
   const oscillator = referenceAudioContext.createOscillator();
   const gain = referenceAudioContext.createGain();
   const now = referenceAudioContext.currentTime;
-
   oscillator.type = "sine";
   oscillator.frequency.setValueAtTime(noteToFrequency(midi), now);
   gain.gain.setValueAtTime(0.0001, now);
@@ -580,10 +554,28 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
-/* ─── Scroll Reveal ─── */
+/* --- Theme Toggle --- */
+const themeToggle = document.querySelector("#themeToggle");
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  localStorage.setItem("theme", theme);
+}
+
+themeToggle.addEventListener("click", function () {
+  const current = document.documentElement.getAttribute("data-theme");
+  applyTheme(current === "light" ? "dark" : "light");
+});
+
+const savedTheme = localStorage.getItem("theme");
+if (savedTheme) {
+  applyTheme(savedTheme);
+}
+
+/* --- Scroll Reveal --- */
 const revealObserver = new IntersectionObserver(
-  (entries) => {
-    entries.forEach((entry) => {
+  function (entries) {
+    entries.forEach(function (entry) {
       if (entry.isIntersecting) {
         entry.target.classList.add("visible");
         revealObserver.unobserve(entry.target);
@@ -593,24 +585,6 @@ const revealObserver = new IntersectionObserver(
   { threshold: 0.12, rootMargin: "0px 0px -40px 0px" }
 );
 
-document.querySelectorAll(".reveal").forEach((el) => revealObserver.observe(el));
-
-/* ─── Theme Toggle ─── */
-const themeToggle = document.querySelector("#themeToggle");
-const themeIcon = themeToggle.querySelector(".theme-icon");
-
-function applyTheme(theme) {
-  document.documentElement.setAttribute("data-theme", theme);
-  themeIcon.textContent = theme === "light" ? "☀" : "☽";
-  localStorage.setItem("theme", theme);
-}
-
-themeToggle.addEventListener("click", () => {
-  const current = document.documentElement.getAttribute("data-theme");
-  applyTheme(current === "light" ? "dark" : "light");
+document.querySelectorAll(".hero, .roll-card, .tips").forEach(function (el) {
+  revealObserver.observe(el);
 });
-
-const savedTheme = localStorage.getItem("theme");
-if (savedTheme) {
-  applyTheme(savedTheme);
-}
