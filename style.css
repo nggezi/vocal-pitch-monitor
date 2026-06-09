@@ -575,6 +575,15 @@ button:disabled {
   color: var(--accent);
 }
 
+.ver {
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
 @media (max-width: 720px) {
   body {
     padding-bottom: calc(100px + env(safe-area-inset-bottom));
