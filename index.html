@@ -4,11 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>实时练唱音高监测</title>
-  <link rel="stylesheet" href="style.css?v=2">
+  <link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
+  <div class="noise-overlay" aria-hidden="true"></div>
+
   <main class="app">
-    <section class="hero">
+    <section class="hero reveal">
       <p class="eyebrow">Vocal Pitch Monitor</p>
       <h1>实时练唱音高监测</h1>
       <p class="intro">打开麦克风唱一句旋律。页面会实时显示当前音高，并像 Auto-Tune 的钢琴窗一样记录最近一段时间的音高轨迹。</p>
@@ -19,7 +21,7 @@
       <p id="status" class="status">等待开始。建议使用 Chrome / Edge，并在安静环境下练习。</p>
     </section>
 
-    <section class="meter-card" aria-live="polite">
+    <section class="meter-card reveal" aria-live="polite">
       <div class="note-row">
         <div>
           <p class="label">当前音高</p>
@@ -60,7 +62,7 @@
       </div>
     </section>
 
-    <section class="roll-card">
+    <section class="roll-card reveal">
       <div class="section-heading">
         <div>
           <p class="eyebrow">Pitch Timeline</p>
@@ -82,7 +84,7 @@
       <p class="roll-help">纵向是钢琴音高，横向是时间。点击左侧钢琴键可以播放参考音；线条越平说明越稳。</p>
     </section>
 
-    <section class="tips">
+    <section class="tips reveal">
       <h2>练习建议</h2>
       <ul>
         <li>唱完整一句后，观察轨迹是否贴近目标音高的横线。</li>
@@ -98,6 +100,6 @@
     <a href="https://github.com/nggezi" target="_blank" rel="noopener">GitHub</a>
   </footer>
 
-  <script src="app.js?v=2"></script>
+  <script src="app.js?v=3"></script>
 </body>
 </html>

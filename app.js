@@ -554,3 +554,18 @@ function setStatus(message, isError) {
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
+
+/* ─── Scroll Reveal ─── */
+const revealObserver = new IntersectionObserver(
+  (entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add("visible");
+        revealObserver.unobserve(entry.target);
+      }
+    });
+  },
+  { threshold: 0.12, rootMargin: "0px 0px -40px 0px" }
+);
+
+document.querySelectorAll(".reveal").forEach((el) => revealObserver.observe(el));
