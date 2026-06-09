@@ -12,96 +12,100 @@
     <span class="theme-icon">☽</span>
   </button>
 
-  <main class="app">
-    <section class="hero reveal">
-      <p class="eyebrow">Vocal Pitch Monitor</p>
-      <h1>实时练唱音高监测</h1>
-      <p class="intro">打开麦克风唱一句旋律。页面会实时显示当前音高，并像 Auto-Tune 的钢琴窗一样记录最近一段时间的音高轨迹。</p>
-      <div class="actions">
-        <button id="startButton" type="button">开始监听</button>
-        <button id="stopButton" type="button" disabled>停止</button>
-      </div>
-      <p id="status" class="status">等待开始。建议使用 Chrome / Edge，并在安静环境下练习。</p>
-    </section>
+  <div class="layout">
+    <aside class="tuner-panel reveal" aria-live="polite">
+      <section class="meter-card">
+        <div class="note-row">
+          <div>
+            <p class="label">当前音高</p>
+            <div id="noteName" class="note-name">--</div>
+          </div>
+          <div class="frequency">
+            <span id="frequencyValue">--</span>
+            <small>Hz</small>
+          </div>
+        </div>
 
-    <section class="meter-card reveal" aria-live="polite">
-      <div class="note-row">
-        <div>
-          <p class="label">当前音高</p>
-          <div id="noteName" class="note-name">--</div>
+        <div class="tuner">
+          <div class="scale">
+            <span>-50</span>
+            <span>0 cents</span>
+            <span>+50</span>
+          </div>
+          <div class="track">
+            <div class="center-line"></div>
+            <div id="needle" class="needle"></div>
+          </div>
+          <p id="centsText" class="cents">--</p>
         </div>
-        <div class="frequency">
-          <span id="frequencyValue">--</span>
-          <small>Hz</small>
-        </div>
-      </div>
 
-      <div class="tuner">
-        <div class="scale">
-          <span>-50</span>
-          <span>0 cents</span>
-          <span>+50</span>
+        <div class="details">
+          <div>
+            <span class="label">标准音频率</span>
+            <strong id="targetFrequency">-- Hz</strong>
+          </div>
+          <div>
+            <span class="label">稳定性</span>
+            <strong id="stability">--</strong>
+          </div>
+          <div>
+            <span class="label">音量</span>
+            <strong id="volume">--</strong>
+          </div>
         </div>
-        <div class="track">
-          <div class="center-line"></div>
-          <div id="needle" class="needle"></div>
-        </div>
-        <p id="centsText" class="cents">--</p>
-      </div>
+      </section>
+    </aside>
 
-      <div class="details">
-        <div>
-          <span class="label">标准音频率</span>
-          <strong id="targetFrequency">-- Hz</strong>
+    <div class="main-content">
+      <section class="hero reveal">
+        <p class="eyebrow">Vocal Pitch Monitor</p>
+        <h1>实时练唱音高监测</h1>
+        <p class="intro">打开麦克风唱一句旋律。页面会实时显示当前音高，并像 Auto-Tune 的钢琴窗一样记录最近一段时间的音高轨迹。</p>
+        <div class="actions">
+          <button id="startButton" type="button">开始监听</button>
+          <button id="stopButton" type="button" disabled>停止</button>
         </div>
-        <div>
-          <span class="label">稳定性</span>
-          <strong id="stability">--</strong>
-        </div>
-        <div>
-          <span class="label">音量</span>
-          <strong id="volume">--</strong>
-        </div>
-      </div>
-    </section>
+        <p id="status" class="status">等待开始。建议使用 Chrome / Edge，并在安静环境下练习。</p>
+      </section>
 
-    <section class="roll-card reveal">
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">Pitch Timeline</p>
-          <h2>钢琴窗音高轨迹</h2>
+      <section class="roll-card reveal">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Pitch Timeline</p>
+            <h2>钢琴窗音高轨迹</h2>
+          </div>
+          <button id="clearRollButton" type="button">清空轨迹</button>
         </div>
-        <button id="clearRollButton" type="button">清空轨迹</button>
-      </div>
-      <div class="range-control" aria-label="选择显示音域">
-        <span>显示音域</span>
-        <button class="range-button" type="button" data-range="bass">男低</button>
-        <button class="range-button active" type="button" data-range="tenor">男高</button>
-        <button class="range-button" type="button" data-range="alto">女低</button>
-        <button class="range-button" type="button" data-range="soprano">女高</button>
-        <button class="range-button" type="button" data-range="wide">宽范围</button>
-      </div>
-      <div class="roll-wrap">
-        <canvas id="pitchRoll" aria-label="最近一段时间的音高变化图"></canvas>
-      </div>
-      <p class="roll-help">纵向是钢琴音高，横向是时间。点击左侧钢琴键可以播放参考音；线条越平说明越稳。</p>
-    </section>
+        <div class="range-control" aria-label="选择显示音域">
+          <span>显示音域</span>
+          <button class="range-button" type="button" data-range="bass">男低</button>
+          <button class="range-button active" type="button" data-range="tenor">男高</button>
+          <button class="range-button" type="button" data-range="alto">女低</button>
+          <button class="range-button" type="button" data-range="soprano">女高</button>
+          <button class="range-button" type="button" data-range="wide">宽范围</button>
+        </div>
+        <div class="roll-wrap">
+          <canvas id="pitchRoll" aria-label="最近一段时间的音高变化图"></canvas>
+        </div>
+        <p class="roll-help">纵向是钢琴音高，横向是时间。点击左侧钢琴键可以播放参考音；线条越平说明越稳。</p>
+      </section>
 
-    <section class="tips reveal">
-      <h2>练习建议</h2>
-      <ul>
-        <li>唱完整一句后，观察轨迹是否贴近目标音高的横线。</li>
-        <li>先唱一个持续 2-4 秒的单音，不要加颤音，观察线条是否水平稳定。</li>
-        <li>偏差在 ±10 cents 内通常已经很准；初练时可以先追求 ±25 cents 内。</li>
-        <li>网页端检测适合练习参考，不等同于专业录音棚校准设备。</li>
-      </ul>
-    </section>
-  </main>
+      <section class="tips reveal">
+        <h2>练习建议</h2>
+        <ul>
+          <li>唱完整一句后，观察轨迹是否贴近目标音高的横线。</li>
+          <li>先唱一个持续 2-4 秒的单音，不要加颤音，观察线条是否水平稳定。</li>
+          <li>偏差在 ±10 cents 内通常已经很准；初练时可以先追求 ±25 cents 内。</li>
+          <li>网页端检测适合练习参考，不等同于专业录音棚校准设备。</li>
+        </ul>
+      </section>
 
-  <footer class="site-footer">
-    <span>nggezi</span>
-    <a href="https://github.com/nggezi" target="_blank" rel="noopener">GitHub</a>
-  </footer>
+      <footer class="site-footer">
+        <span>nggezi</span>
+        <a href="https://github.com/nggezi" target="_blank" rel="noopener">GitHub</a>
+      </footer>
+    </div>
+  </div>
 
   <script src="app.js?v=4"></script>
 </body>

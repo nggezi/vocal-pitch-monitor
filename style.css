@@ -126,10 +126,65 @@ body {
   transform: translateY(0);
 }
 
-.app {
-  width: min(1080px, calc(100% - 32px));
+.layout {
+  display: flex;
+  gap: 24px;
+  width: min(1200px, calc(100% - 48px));
   margin: 0 auto;
-  padding: 48px 0;
+  padding: 48px 0 60px;
+}
+
+.main-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.tuner-panel {
+  width: 260px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 32px;
+  align-self: flex-start;
+}
+
+@media (min-width: 721px) {
+  .tuner-panel .note-name {
+    font-size: 3.8rem;
+  }
+  .tuner-panel .frequency {
+    min-width: 0;
+    font-size: 1.6rem;
+    text-align: left;
+    margin-top: 8px;
+  }
+  .tuner-panel .note-row {
+    display: block;
+  }
+  .tuner-panel .tuner {
+    margin: 24px 0 20px;
+  }
+  .tuner-panel .track {
+    height: 48px;
+  }
+  .tuner-panel .needle {
+    top: 6px;
+    width: 5px;
+    height: 36px;
+  }
+  .tuner-panel .details {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .tuner-panel .details div {
+    padding: 12px;
+    border-radius: 14px;
+  }
+  .tuner-panel .details strong {
+    font-size: 0.92rem;
+  }
 }
 
 .hero,
@@ -139,13 +194,11 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: var(--card);
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.34);
-  backdrop-filter: blur(18px);
   border-radius: 28px;
 }
 
 .hero {
   padding: 40px;
-  margin-bottom: 22px;
 }
 
 .eyebrow,
@@ -218,73 +271,6 @@ button:disabled {
 
 .meter-card {
   padding: 34px;
-}
-
-@media (min-width: 1180px) {
-  .app {
-    width: min(980px, calc(100vw - 340px));
-    margin-left: calc((100vw - min(980px, 100vw - 340px) + 260px) / 2);
-  }
-
-  .meter-card {
-    position: fixed;
-    z-index: 8;
-    top: 24px;
-    left: 22px;
-    width: 250px;
-    max-height: calc(100vh - 48px);
-    overflow: auto;
-    padding: 18px;
-    border-radius: 22px;
-  }
-
-  .meter-card .note-row {
-    display: block;
-  }
-
-  .meter-card .note-name {
-    margin-top: 8px;
-    font-size: 4rem;
-    letter-spacing: -0.07em;
-  }
-
-  .meter-card .frequency {
-    min-width: 0;
-    margin-top: 10px;
-    text-align: left;
-    font-size: 1.8rem;
-  }
-
-  .meter-card .tuner {
-    margin: 22px 0 18px;
-  }
-
-  .meter-card .track {
-    height: 42px;
-  }
-
-  .meter-card .needle {
-    top: 7px;
-    width: 7px;
-    height: 28px;
-  }
-
-  .meter-card .cents {
-    font-size: 0.96rem;
-  }
-
-  .meter-card .details {
-    grid-template-columns: 1fr;
-  }
-
-  .meter-card .details div {
-    padding: 12px;
-    border-radius: 14px;
-  }
-
-  .meter-card .details strong {
-    font-size: 0.98rem;
-  }
 }
 
 .roll-card {
@@ -501,9 +487,21 @@ button:disabled {
     padding-bottom: calc(150px + env(safe-area-inset-bottom));
   }
 
-  .app {
+  .layout {
+    flex-direction: column;
     width: min(100% - 20px, 1080px);
     padding: 20px 0;
+    gap: 16px;
+  }
+
+  .tuner-panel {
+    width: 100%;
+    position: fixed;
+    z-index: 12;
+    left: 10px;
+    right: 10px;
+    bottom: calc(10px + env(safe-area-inset-bottom));
+    top: auto;
   }
 
   .hero,
@@ -514,9 +512,13 @@ button:disabled {
   }
 
   .hero,
-  .meter-card,
   .roll-card {
     padding: 24px;
+  }
+
+  .meter-card {
+    padding: 12px;
+    border-radius: 20px;
   }
 
   .section-heading {
@@ -532,46 +534,19 @@ button:disabled {
     min-height: 360px;
   }
 
-  .actions {
-    border-radius: 24px;
-  }
-
   .note-row {
-    display: block;
-  }
-
-  .frequency {
-    margin-top: 18px;
-    text-align: left;
-  }
-
-  .details {
-    grid-template-columns: 1fr;
-  }
-
-  .meter-card {
-    position: fixed;
-    z-index: 12;
-    left: 10px;
-    right: 10px;
-    bottom: calc(10px + env(safe-area-inset-bottom));
-    padding: 12px;
-    border-radius: 20px;
-  }
-
-  .meter-card .note-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
   }
 
-  .meter-card .note-name {
+  .note-name {
     margin-top: 4px;
     font-size: 2.7rem;
   }
 
-  .meter-card .frequency {
+  .frequency {
     min-width: 88px;
     margin-top: 0;
     text-align: right;
