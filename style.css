@@ -370,6 +370,26 @@ button:disabled {
   line-height: 1.8;
 }
 
+.site-footer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  padding: 40px 0 32px;
+  color: #555;
+  font-size: 0.82rem;
+}
+
+.site-footer a {
+  color: #777;
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.site-footer a:hover {
+  color: var(--accent);
+}
+
 @media (max-width: 720px) {
   body {
     padding-bottom: calc(150px + env(safe-area-inset-bottom));
