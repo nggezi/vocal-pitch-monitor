@@ -325,9 +325,10 @@ button:disabled {
   color: var(--muted);
 }
 
-.meter-card {
-  padding: 34px;
-}
+  .meter-card {
+    padding: 10px 14px;
+    border-radius: 16px;
+  }
 
 .roll-card {
   margin-top: 22px;
@@ -576,7 +577,7 @@ button:disabled {
 
 @media (max-width: 720px) {
   body {
-    padding-bottom: calc(150px + env(safe-area-inset-bottom));
+    padding-bottom: calc(100px + env(safe-area-inset-bottom));
   }
 
   .layout {
@@ -587,13 +588,13 @@ button:disabled {
   }
 
   .tuner-panel {
-    width: 100%;
     position: fixed;
     z-index: 12;
-    left: 10px;
-    right: 10px;
+    left: 50%;
+    transform: translateX(-50%);
     bottom: calc(10px + env(safe-area-inset-bottom));
     top: auto;
+    width: min(420px, calc(100% - 24px));
   }
 
   .hero,
@@ -635,52 +636,29 @@ button:disabled {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: 8px;
   }
 
   .note-name {
-    margin-top: 4px;
-    font-size: 2.7rem;
+    margin-top: 0;
+    font-size: 1.8rem;
+    line-height: 1;
   }
 
   .frequency {
-    min-width: 88px;
+    min-width: 60px;
     margin-top: 0;
     text-align: right;
-    font-size: 1.25rem;
+    font-size: 1rem;
   }
 
-  .meter-card .frequency small {
-    font-size: 0.7rem;
-  }
-
-  .meter-card .tuner {
-    margin: 10px 0 0;
-  }
-
-  .meter-card .scale {
-    display: none;
-  }
-
-  .meter-card .track {
-    height: 30px;
-  }
-
-  .meter-card .needle {
-    top: 5px;
-    width: 6px;
-    height: 20px;
-  }
-
-  .meter-card .cents {
-    min-height: 1.2em;
-    margin: 7px 0 0;
-    font-size: 0.88rem;
-  }
-
-  .meter-card .details {
-    display: none;
-  }
+  .meter-card .frequency small { font-size: 0.65rem; }
+  .meter-card .tuner { margin: 6px 0 0; }
+  .meter-card .scale { display: none; }
+  .meter-card .track { height: 24px; }
+  .meter-card .needle { top: 4px; width: 5px; height: 16px; }
+  .meter-card .cents { min-height: 1em; margin: 4px 0 0; font-size: 0.75rem; }
+  .meter-card .details { display: none; }
 }
 
 .mobile-switcher {
