@@ -41,8 +41,8 @@ let smoothedCents = null;
 let lastPitchTime = 0;
 const SMOOTH_FACTOR = 0.15;
 const CENTS_SMOOTH = 0.2;
-const VOLUME_THRESHOLD = 0.006;
-const HOLD_MS = 350;
+const VOLUME_THRESHOLD = 0.003;
+const HOLD_MS = 400;
 
 function getThemeColor(varName) {
   return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
@@ -143,7 +143,7 @@ function detectPitch() {
 
   const rawFrequency = yinDetect(buffer, audioContext.sampleRate);
 
-  const hasVoice = rawFrequency !== null && rawFrequency >= 65 && rawFrequency <= 1200 && rms >= VOLUME_THRESHOLD;
+  const hasVoice = rawFrequency !== null && rawFrequency >= 40 && rawFrequency <= 2000 && rms >= VOLUME_THRESHOLD;
 
   if (hasVoice) {
     lastPitchTime = now;
@@ -588,3 +588,5 @@ const revealObserver = new IntersectionObserver(
 document.querySelectorAll(".hero, .roll-card, .tips").forEach(function (el) {
   revealObserver.observe(el);
 });
+
+window.scrollTo(0, 0);
