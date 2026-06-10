@@ -30,8 +30,8 @@ const RANGES = {
   alto: { min: 48, max: 81 }, soprano: { min: 55, max: 88 },
   wide: { min: 33, max: 93 },
 };
-const SMOOTH = 0.15, CENTS_SMOOTH = 0.2, VOLUME_THR = 0.006;
-const HOLD_MS = 350, JUMP_CENTS = 400, ROLL_WINDOW = 14000;
+const SMOOTH = 0.15, CENTS_SMOOTH = 0.2, VOLUME_THR = 0.003;
+const HOLD_MS = 400, JUMP_CENTS = 600, ROLL_WINDOW = 14000;
 
 /* ─── State ─── */
 let audioCtx, analyser, mic, stream, buffer;
@@ -173,7 +173,7 @@ function detect() {
 
   const now = performance.now();
   const raw = yin(buffer, audioCtx.sampleRate);
-  const hasVoice = raw !== null && raw >= 65 && raw <= 1200 && rms >= VOLUME_THR;
+  const hasVoice = raw !== null && raw >= 40 && raw <= 2000 && rms >= VOLUME_THR;
 
   if (hasVoice) {
     lastPitchTime = now;
@@ -489,6 +489,9 @@ $$(".pill").forEach(b => b.addEventListener("click", () => {
 
 resizeRoll();
 rollAnimId = requestAnimationFrame(tickRoll);
+
+/* ─── Scroll to top on load ─── */
+window.scrollTo(0, 0);
 
 /* ─── Scroll Reveal ─── */
 const revealObs = new IntersectionObserver((entries) => {
