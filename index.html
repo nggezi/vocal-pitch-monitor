@@ -3,8 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0c0e16">
+  <meta name="description" content="实时练唱音高监测 - 像 Auto-Tune 一样记录音高轨迹">
   <title>Vocal Studio</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='45' fill='%238effd2'/><text y='.9em' x='50' text-anchor='middle' font-size='65'>♪</text></svg>">
+  <link rel="manifest" href="manifest.json">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -15,50 +18,77 @@
   <div class="glow glow-1" aria-hidden="true"></div>
   <div class="glow glow-2" aria-hidden="true"></div>
 
-  <button id="themeToggle" class="theme-btn" aria-label="切换主题">
-    <svg class="icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-    <svg class="icon-moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+  <!-- Guide Overlay -->
+  <div id="guideOverlay" class="guide-overlay" role="dialog" aria-label="使用引导">
+    <div class="guide-card">
+      <div class="guide-icon">🎤</div>
+      <h2>欢迎使用 Vocal Studio</h2>
+      <p>这是一个实时音高监测工具，帮助你练习唱歌。</p>
+      <ol>
+        <li>点击「开始监听」允许浏览器使用麦克风</li>
+        <li>对着麦克风唱一个稳定的单音</li>
+        <li>观察左侧调音器和钢琴窗中的音高轨迹</li>
+      </ol>
+      <button id="guideClose" class="cta" type="button">
+        <span>开始使用</span>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      </button>
+      <p class="guide-tip">提示：使用 Chrome / Edge 效果最佳</p>
+    </div>
+  </div>
+
+  <button id="themeToggle" class="theme-btn" aria-label="切换日夜间主题">
+    <span class="icon-sun" aria-hidden="true">☀</span>
+    <span class="icon-moon" aria-hidden="true">☽</span>
   </button>
 
-  <div class="layout">
+  <a href="#mainContent" class="skip-link">跳转到主要内容</a>
+
+  <div class="layout" id="mainContent">
     <!-- Left: Tuner Panel -->
-    <aside class="tuner-panel" aria-live="polite">
+    <aside class="tuner-panel" aria-live="polite" aria-label="实时调音器">
       <div class="tuner-shell">
         <div class="tuner-core">
           <div class="tuner-head">
             <span class="tag">TUNER</span>
             <div class="freq-display">
-              <span id="noteName" class="note-glyph">--</span>
-              <span id="frequencyValue" class="freq-num">--</span>
+              <span id="noteName" class="note-glyph" aria-label="当前音高">--</span>
+              <span id="frequencyValue" class="freq-num" aria-label="当前频率">--</span>
               <span class="freq-unit">Hz</span>
             </div>
           </div>
 
-          <div class="meter">
-            <div class="meter-scale">
+          <div class="meter" role="img" aria-label="音准偏差指示器">
+            <div class="meter-scale" aria-hidden="true">
               <span>-50</span>
               <span>0</span>
               <span>+50</span>
             </div>
             <div class="meter-track">
-              <div class="meter-center"></div>
-              <div id="needle" class="meter-needle"></div>
+              <div class="meter-center" aria-hidden="true"></div>
+              <div id="needle" class="meter-needle" aria-hidden="true"></div>
             </div>
-            <p id="centsText" class="meter-reading">--</p>
+            <p id="centsText" class="meter-reading" aria-live="polite">--</p>
           </div>
 
           <div class="stat-grid">
             <div class="stat">
               <span class="stat-label">标准音</span>
-              <strong id="targetFrequency">-- Hz</strong>
+              <strong id="targetFrequency" aria-label="目标标准音频率">-- Hz</strong>
             </div>
             <div class="stat">
               <span class="stat-label">稳定性</span>
-              <strong id="stability">--</strong>
+              <strong id="stability" aria-label="音高稳定性">--</strong>
             </div>
             <div class="stat">
               <span class="stat-label">音量</span>
-              <strong id="volume">--</strong>
+              <strong id="volume" aria-label="当前音量">--</strong>
+            </div>
+          </div>
+
+          <div class="volume-bar-wrap" aria-label="音量指示">
+            <div class="volume-bar-track">
+              <div id="volumeBar" class="volume-bar-fill"></div>
             </div>
           </div>
         </div>
@@ -73,17 +103,17 @@
         <h1>实时练唱<br>音高监测</h1>
         <p class="hero-desc">打开麦克风唱一句旋律。页面会实时显示当前音高，并像 Auto-Tune 的钢琴窗一样记录最近一段时间的音高轨迹。</p>
         <div class="hero-actions">
-          <button id="startButton" class="cta">
+          <button id="startButton" class="cta" aria-label="开始监听音高">
             <span>开始监听</span>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
           </button>
-          <button id="stopButton" class="cta cta-ghost" disabled>停止</button>
+          <button id="stopButton" class="cta cta-ghost" disabled aria-label="停止监听">停止</button>
         </div>
-        <p id="status" class="status-text">等待开始。建议使用 Chrome / Edge。</p>
+        <p id="status" class="status-text" role="status" aria-live="polite">等待开始。建议使用 Chrome / Edge。</p>
       </header>
 
       <!-- Piano Roll -->
-      <section class="roll-section">
+      <section class="roll-section" aria-label="钢琴窗音高轨迹">
         <div class="roll-shell">
           <div class="roll-core">
             <div class="roll-header">
@@ -91,22 +121,22 @@
                 <span class="tag">PITCH TIMELINE</span>
                 <h2>钢琴窗音高轨迹</h2>
               </div>
-              <button id="clearRollButton" class="cta cta-ghost cta-sm">清空</button>
+              <button id="clearRollButton" class="cta cta-ghost cta-sm" aria-label="清空音高轨迹">清空</button>
             </div>
 
-            <div class="range-row">
+            <div class="range-row" role="radiogroup" aria-label="选择显示音域">
               <span class="range-label">音域</span>
               <div class="range-group">
-                <button class="pill" data-range="bass">男低</button>
-                <button class="pill active" data-range="tenor">男高</button>
-                <button class="pill" data-range="alto">女低</button>
-                <button class="pill" data-range="soprano">女高</button>
-                <button class="pill" data-range="wide">宽</button>
+                <button class="pill" data-range="bass" role="radio" aria-checked="false">男低</button>
+                <button class="pill active" data-range="tenor" role="radio" aria-checked="true">男高</button>
+                <button class="pill" data-range="alto" role="radio" aria-checked="false">女低</button>
+                <button class="pill" data-range="soprano" role="radio" aria-checked="false">女高</button>
+                <button class="pill" data-range="wide" role="radio" aria-checked="false">宽</button>
               </div>
             </div>
 
             <div class="canvas-shell">
-              <canvas id="pitchRoll"></canvas>
+              <canvas id="pitchRoll" aria-label="音高轨迹图，点击左侧琴键可播放参考音"></canvas>
             </div>
 
             <p class="roll-hint">点击左侧琴键播放参考音 · 线条越平越稳</p>
@@ -114,26 +144,63 @@
         </div>
       </section>
 
+      <!-- Vocal Range Stats -->
+      <section class="stats-section" aria-label="音域统计">
+        <div class="stats-shell">
+          <div class="stats-core">
+            <div class="stats-header">
+              <span class="tag">VOCAL RANGE</span>
+              <h2>音域统计</h2>
+            </div>
+            <div class="stats-grid">
+              <div class="stat-card">
+                <span class="stat-label">最高音</span>
+                <strong id="statHigh" class="stat-value">--</strong>
+                <span id="statHighHz" class="stat-sub">--</span>
+              </div>
+              <div class="stat-card">
+                <span class="stat-label">最低音</span>
+                <strong id="statLow" class="stat-value">--</strong>
+                <span id="statLowHz" class="stat-sub">--</span>
+              </div>
+              <div class="stat-card">
+                <span class="stat-label">平均音高</span>
+                <strong id="statAvg" class="stat-value">--</strong>
+                <span id="statAvgHz" class="stat-sub">--</span>
+              </div>
+              <div class="stat-card">
+                <span class="stat-label">音域跨度</span>
+                <strong id="statSpan" class="stat-value">--</strong>
+                <span id="statSpanNote" class="stat-sub">--</span>
+              </div>
+            </div>
+            <div class="stats-note">
+              <p>数据来自当前监听会话，停止后重置。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- Tips -->
-      <section class="tips-section">
+      <section class="tips-section" aria-label="练习建议">
         <div class="tips-shell">
           <div class="tips-core">
             <h2>练习建议</h2>
             <div class="tips-grid">
               <div class="tip-card">
-                <span class="tip-num">01</span>
+                <span class="tip-num" aria-hidden="true">01</span>
                 <p>唱完整一句后，观察轨迹是否贴近目标音高的横线。</p>
               </div>
               <div class="tip-card">
-                <span class="tip-num">02</span>
+                <span class="tip-num" aria-hidden="true">02</span>
                 <p>先唱持续 2-4 秒的单音，不加颤音，观察线条是否水平稳定。</p>
               </div>
               <div class="tip-card">
-                <span class="tip-num">03</span>
+                <span class="tip-num" aria-hidden="true">03</span>
                 <p>偏差在 ±10 cents 内通常已经很准；初练可以先追求 ±25 cents 内。</p>
               </div>
               <div class="tip-card">
-                <span class="tip-num">04</span>
+                <span class="tip-num" aria-hidden="true">04</span>
                 <p>网页端检测适合练习参考，不等同于专业录音棚校准设备。</p>
               </div>
             </div>
@@ -143,7 +210,7 @@
 
       <footer class="foot">
         <span>nggezi</span>
-        <span class="ver">v1.0</span>
+        <span class="ver">v2.1</span>
         <a href="https://github.com/nggezi" target="_blank" rel="noopener">GitHub</a>
       </footer>
     </div>

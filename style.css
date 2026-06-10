@@ -367,6 +367,79 @@ body {
   font-size: 0.85rem; font-weight: 500; text-align: center;
 }
 
+/* ─── Stats Section ─── */
+.stats-section {
+  opacity: 0; transform: translateY(24px);
+  transition: opacity 0.8s var(--ease) 0.15s, transform 0.8s var(--ease) 0.15s;
+}
+.stats-section.visible { opacity: 1; transform: translateY(0); }
+
+.stats-core { padding: 36px; }
+
+.stats-header {
+  margin-bottom: 24px;
+}
+.stats-header h2 {
+  margin: 8px 0 0; font-size: 1.3rem;
+  font-weight: 800; letter-spacing: -0.02em;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.stat-card {
+  padding: 20px 16px;
+  border-radius: var(--r-md);
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.04);
+  text-align: center;
+  transition: all 0.3s var(--spring);
+}
+.stat-card:hover {
+  background: rgba(255,255,255,0.05);
+  transform: translateY(-2px);
+}
+
+.stat-card .stat-label {
+  display: block;
+  font-size: 0.68rem;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.stat-value {
+  display: block;
+  font-size: 1.6rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--accent);
+  margin-bottom: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-sub {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+.stats-note {
+  margin-top: 16px;
+  text-align: center;
+}
+.stats-note p {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 0.82rem;
+}
+
 /* ─── Tips ─── */
 .tips-section {
   opacity: 0; transform: translateY(24px);
@@ -420,7 +493,57 @@ body {
 }
 
 /* ═══════════════════════════════════════════
-   RESPONSIVE
+  /* ─── Volume Bar ─── */
+.volume-bar-wrap { margin-top: 12px; }
+.volume-bar-track {
+  height: 4px; border-radius: 2px;
+  background: rgba(255,255,255,0.06); overflow: hidden;
+}
+.volume-bar-fill {
+  height: 100%; width: 0%; border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-glow));
+  transition: width 0.1s ease;
+}
+
+/* ─── Guide Overlay ─── */
+.guide-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(5, 6, 12, 0.85);
+  backdrop-filter: blur(16px);
+  opacity: 1; visibility: visible;
+  transition: opacity 0.5s var(--ease), visibility 0.5s;
+}
+.guide-overlay.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+
+.guide-card {
+  max-width: 420px; width: 90%;
+  padding: 40px 36px;
+  background: var(--core);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  text-align: center;
+}
+.guide-icon { font-size: 3rem; margin-bottom: 16px; }
+.guide-card h2 { margin: 0 0 12px; font-size: 1.4rem; font-weight: 800; }
+.guide-card > p { margin: 0 0 20px; color: var(--text-2); line-height: 1.7; font-size: 0.95rem; }
+.guide-card ol {
+  text-align: left; margin: 0 0 28px; padding-left: 20px;
+  color: var(--text-2); line-height: 1.9; font-size: 0.9rem;
+}
+.guide-card ol li { margin-bottom: 6px; }
+.guide-tip { margin: 16px 0 0; color: var(--text-2); font-size: 0.78rem; }
+
+/* ─── Skip Link ─── */
+.skip-link {
+  position: fixed; top: -100px; left: 16px; z-index: 300;
+  padding: 12px 20px; border-radius: var(--r-sm);
+  background: var(--accent); color: #0c0e16; font-weight: 700;
+  text-decoration: none; transition: top 0.3s ease;
+}
+.skip-link:focus { top: 16px; }
+
+ RESPONSIVE
    ═══════════════════════════════════════════ */
 
 @media (max-width: 960px) and (min-width: 721px) {
@@ -476,5 +599,6 @@ body {
   .roll-core { padding: 22px; }
   .tips-core { padding: 22px; }
   .tips-grid { grid-template-columns: 1fr; }
+  .stats-grid { grid-template-columns: 1fr 1fr; }
   #pitchRoll { height: 360px; min-height: 360px; }
 }

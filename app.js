@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════
-   VOCAL STUDIO — Engine
+   VOCAL STUDIO — Engine v2.0
    ═══════════════════════════════════════════ */
 
 const $ = (s) => document.querySelector(s);
@@ -15,26 +15,23 @@ const centsText = $("#centsText");
 const targetFrequency = $("#targetFrequency");
 const stability = $("#stability");
 const volume = $("#volume");
+const volumeBar = $("#volumeBar");
 const needle = $("#needle");
 const pitchRoll = $("#pitchRoll");
 const clearRollButton = $("#clearRollButton");
+const guideOverlay = $("#guideOverlay");
+const guideClose = $("#guideClose");
 const rollCtx = pitchRoll.getContext("2d");
 
 /* ─── Constants ─── */
 const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
 const RANGES = {
-  bass:     { min: 36, max: 67 },
-  tenor:    { min: 43, max: 76 },
-  alto:     { min: 48, max: 81 },
-  soprano:  { min: 55, max: 88 },
-  wide:     { min: 33, max: 93 },
+  bass: { min: 36, max: 67 }, tenor: { min: 43, max: 76 },
+  alto: { min: 48, max: 81 }, soprano: { min: 55, max: 88 },
+  wide: { min: 33, max: 93 },
 };
-const SMOOTH = 0.15;
-const CENTS_SMOOTH = 0.2;
-const VOLUME_THR = 0.006;
-const HOLD_MS = 350;
-const JUMP_CENTS = 400;
-const ROLL_WINDOW = 14000;
+const SMOOTH = 0.15, CENTS_SMOOTH = 0.2, VOLUME_THR = 0.006;
+const HOLD_MS = 350, JUMP_CENTS = 400, ROLL_WINDOW = 14000;
 
 /* ─── State ─── */
 let audioCtx, analyser, mic, stream, buffer;
@@ -44,42 +41,66 @@ let smoothedFreq = null, smoothedCents = null, lastPitchTime = 0;
 let minMidi = RANGES.tenor.min, maxMidi = RANGES.tenor.max;
 const pitchHistory = [];
 const timeline = [];
-let lastLayout = { kbW: 76, h: 430 };
+let lastLayout = { kbW: 72, h: 430 };
+let bgCache = null, bgCacheKey = "";
+
+/* ─── Vocal Range Stats ─── */
+let statHighMidi = -Infinity, statLowMidi = Infinity;
+let statSumFreq = 0, statCount = 0;
 
 /* ═══════════════════════════════════════════
-   PITCH DETECTION (YIN)
+   GUIDE OVERLAY
    ═══════════════════════════════════════════ */
+if (!localStorage.getItem("vs_guide_seen")) {
+  guideOverlay.classList.remove("hidden");
+  guideClose.addEventListener("click", () => {
+    guideOverlay.classList.add("hidden");
+    localStorage.setItem("vs_guide_seen", "1");
+  });
+} else {
+  guideOverlay.classList.add("hidden");
+}
 
+/* ═══════════════════════════════════════════
+   PWA
+   ═══════════════════════════════════════════ */
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("./service-worker.js").catch(() => {});
+}
+
+/* ═══════════════════════════════════════════
+   THEME
+   ═══════════════════════════════════════════ */
+const themeToggle = $("#themeToggle");
+function applyTheme(t) {
+  document.documentElement.setAttribute("data-theme", t);
+  localStorage.setItem("vs_theme", t);
+}
+themeToggle.addEventListener("click", () => {
+  applyTheme(document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light");
+});
+const savedTheme = localStorage.getItem("vs_theme");
+if (savedTheme) applyTheme(savedTheme);
+
+/* ═══════════════════════════════════════════
+   YIN PITCH DETECTION
+   ═══════════════════════════════════════════ */
 function yin(samples, sr) {
   const half = samples.length >> 1;
   const buf = new Float32Array(half);
-
   for (let t = 0; t < half; t++) {
     let s = 0;
-    for (let i = 0; i < half; i++) {
-      const d = samples[i] - samples[i + t];
-      s += d * d;
-    }
+    for (let i = 0; i < half; i++) { const d = samples[i] - samples[i + t]; s += d * d; }
     buf[t] = s;
   }
-
   buf[0] = 1;
   let sum = 0;
-  for (let t = 1; t < half; t++) {
-    sum += buf[t];
-    buf[t] = buf[t] * t / sum;
-  }
-
+  for (let t = 1; t < half; t++) { sum += buf[t]; buf[t] = buf[t] * t / sum; }
   let tau = -1;
   for (let t = 2; t < half; t++) {
-    if (buf[t] < 0.15) {
-      while (t + 1 < half && buf[t + 1] < buf[t]) t++;
-      tau = t;
-      break;
-    }
+    if (buf[t] < 0.15) { while (t + 1 < half && buf[t + 1] < buf[t]) t++; tau = t; break; }
   }
   if (tau === -1) return null;
-
   const s0 = buf[tau - 1], s1 = buf[tau], s2 = buf[tau + 1] ?? s1;
   const d = s0 - 2 * s1 + s2;
   const shift = d === 0 ? 0 : (s0 - s2) / (2 * d);
@@ -89,16 +110,26 @@ function yin(samples, sr) {
 /* ═══════════════════════════════════════════
    CORE LOOP
    ═══════════════════════════════════════════ */
-
 async function start() {
   if (!navigator.mediaDevices?.getUserMedia) {
-    setStatus("浏览器不支持麦克风", true);
+    setStatus("当前浏览器不支持麦克风采集。请使用 Chrome / Edge / Safari 16+。", true);
     return;
   }
   try {
     stream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
     });
+  } catch (e) {
+    if (e.name === "NotAllowedError") {
+      setStatus("麦克风权限被拒绝。请在浏览器设置中允许访问麦克风。", true);
+    } else if (e.name === "NotFoundError") {
+      setStatus("未检测到麦克风设备。请连接麦克风后重试。", true);
+    } else {
+      setStatus("无法打开麦克风：" + e.message, true);
+    }
+    return;
+  }
+  try {
     audioCtx = new AudioContext();
     analyser = audioCtx.createAnalyser();
     analyser.fftSize = 4096;
@@ -106,13 +137,12 @@ async function start() {
     mic = audioCtx.createMediaStreamSource(stream);
     mic.connect(analyser);
     buffer = new Float32Array(analyser.fftSize);
-
     startButton.disabled = true;
     stopButton.disabled = false;
     setStatus("正在监听，请唱一个稳定的单音。", false);
     detect();
   } catch (e) {
-    setStatus(`无法打开麦克风：${e.message}`, true);
+    setStatus("音频初始化失败：" + e.message, true);
   }
 }
 
@@ -136,6 +166,11 @@ function detect() {
   analyser.getFloatTimeDomainData(buffer);
   const rms = getRms(buffer);
   volume.textContent = Math.round(rms * 1000);
+
+  // Volume bar
+  const volPct = Math.min(100, Math.round((rms / 0.1) * 100));
+  volumeBar.style.width = volPct + "%";
+
   const now = performance.now();
   const raw = yin(buffer, audioCtx.sampleRate);
   const hasVoice = raw !== null && raw >= 65 && raw <= 1200 && rms >= VOLUME_THR;
@@ -147,40 +182,41 @@ function detect() {
       if (jc > JUMP_CENTS) { animId = requestAnimationFrame(detect); return; }
     }
     smoothedFreq = smoothedFreq === null ? raw : smoothedFreq + SMOOTH * (raw - smoothedFreq);
-
     const note = freqToNote(smoothedFreq);
     const target = noteToFreq(note.midi);
     const cents = 1200 * Math.log2(smoothedFreq / target);
     smoothedCents = smoothedCents === null ? cents : smoothedCents + CENTS_SMOOTH * (cents - smoothedCents);
-
     pitchHistory.push(cents);
     if (pitchHistory.length > 18) pitchHistory.shift();
     recordPoint(smoothedFreq, rms);
 
+    // Track vocal range stats
+    const noteMidi = Math.round(69 + 12 * Math.log2(smoothedFreq / 440));
+    if (noteMidi > statHighMidi) statHighMidi = noteMidi;
+    if (noteMidi < statLowMidi) statLowMidi = noteMidi;
+    statSumFreq += smoothedFreq;
+    statCount++;
+    updateStats();
     noteName.textContent = note.name;
     frequencyValue.textContent = smoothedFreq.toFixed(1);
-    targetFrequency.textContent = `${target.toFixed(1)} Hz`;
+    targetFrequency.textContent = target.toFixed(1) + " Hz";
     centsText.textContent = fmtCents(Math.round(smoothedCents));
     stability.textContent = fmtStability(pitchHistory);
-    needle.style.left = `${50 + clamp(smoothedCents, -50, 50)}%`;
+    needle.style.left = (50 + clamp(smoothedCents, -50, 50)) + "%";
     setStatus("正在监听。", false);
-
   } else if (smoothedFreq !== null && now - lastPitchTime < HOLD_MS) {
     recordPoint(smoothedFreq, rms);
-
   } else {
     showNoPitch(rms < VOLUME_THR ? "音量太小，请靠近麦克风。" : "暂未检测到音高。");
     smoothedFreq = null;
     smoothedCents = null;
   }
-
   animId = requestAnimationFrame(detect);
 }
 
 /* ═══════════════════════════════════════════
-   CANVAS — PIANO ROLL
+   CANVAS — PIANO ROLL (Optimized)
    ═══════════════════════════════════════════ */
-
 function getColors() {
   const s = getComputedStyle(document.documentElement);
   const v = (n) => s.getPropertyValue(n).trim();
@@ -198,10 +234,59 @@ function resizeRoll() {
   pitchRoll.width = Math.max(1, rect.width * r | 0);
   pitchRoll.height = Math.max(1, rect.height * r | 0);
   rollCtx.setTransform(r, 0, 0, r, 0, 0);
+  bgCache = null;
   drawRoll();
 }
 
 function tickRoll() { drawRoll(); rollAnimId = requestAnimationFrame(tickRoll); }
+
+function buildBgCache(W, H, kbW, rowH) {
+  const c = getColors();
+  const oc = document.createElement("canvas");
+  const ocCtx = oc.getContext("2d");
+  const r = window.devicePixelRatio || 1;
+  oc.width = W * r; oc.height = H * r;
+  ocCtx.setTransform(r, 0, 0, r, 0, 0);
+
+  ocCtx.fillStyle = c.bg;
+  ocCtx.fillRect(0, 0, W, H);
+
+  for (let m = maxMidi; m >= minMidi; m--) {
+    const y = midiY(m, H);
+    const ni = ((m % 12) + 12) % 12;
+    const isBlack = [1,3,6,8,10].includes(ni);
+    const isC = ni === 0;
+    ocCtx.fillStyle = isBlack ? "rgba(128,128,128,0.05)" : "rgba(128,128,128,0.1)";
+    ocCtx.fillRect(kbW, y, W - kbW, rowH);
+    ocCtx.strokeStyle = isC ? c.accent + "40" : c.grid;
+    ocCtx.lineWidth = isC ? 1.2 : 0.8;
+    ocCtx.beginPath(); ocCtx.moveTo(kbW, y); ocCtx.lineTo(W, y); ocCtx.stroke();
+    ocCtx.fillStyle = isBlack ? "rgba(0,0,0,0.3)" : "rgba(255,255,255,0.06)";
+    ocCtx.fillRect(0, y + 1, kbW - 6, Math.max(1, rowH - 2));
+    if (isBlack) { ocCtx.fillStyle = "rgba(0,0,0,0.5)"; ocCtx.fillRect(0, y + 2, kbW * 0.6, Math.max(1, rowH - 4)); }
+    if (ni === 0 || ni === 4 || ni === 7) {
+      ocCtx.fillStyle = c.text;
+      ocCtx.font = `600 ${W < 500 ? 9 : 10}px system-ui`;
+      ocCtx.textAlign = "right"; ocCtx.textBaseline = "middle";
+      ocCtx.fillText(noteNameStr(m), kbW - 12, y + rowH / 2);
+    }
+  }
+  ocCtx.fillStyle = c.grid;
+  ocCtx.fillRect(kbW - 6, 0, 1, H);
+  for (let s = 0; s <= ROLL_WINDOW / 1000; s += 2) {
+    const x = kbW + (W - kbW) - (s * 1000 / ROLL_WINDOW) * (W - kbW);
+    ocCtx.strokeStyle = c.grid; ocCtx.lineWidth = 0.7;
+    ocCtx.beginPath(); ocCtx.moveTo(x, 0); ocCtx.lineTo(x, H); ocCtx.stroke();
+  }
+  ocCtx.fillStyle = c.text;
+  ocCtx.font = `600 ${W < 500 ? 9 : 10}px system-ui`;
+  ocCtx.textAlign = "right"; ocCtx.textBaseline = "top";
+  ocCtx.fillText("now", kbW + (W - kbW) - 30, 8);
+  ocCtx.textAlign = "left";
+  ocCtx.fillText("-" + (ROLL_WINDOW / 1000) + "s", kbW + 8, 8);
+
+  return oc;
+}
 
 function drawRoll() {
   const W = pitchRoll.clientWidth, H = pitchRoll.clientHeight;
@@ -211,69 +296,13 @@ function drawRoll() {
   const rowH = H / (maxMidi - minMidi + 1);
   lastLayout = { kbW, h: H };
   trimTimeline(now);
-  rollCtx.clearRect(0, 0, W, H);
 
   const c = getColors();
+  const key = `${W}x${H}_${minMidi}_${maxMidi}_${c.bg}`;
+  if (!bgCache || bgCacheKey !== key) { bgCache = buildBgCache(W, H, kbW, rowH); bgCacheKey = key; }
+  rollCtx.clearRect(0, 0, W, H);
+  rollCtx.drawImage(bgCache, 0, 0, W, H);
 
-  // Background
-  rollCtx.fillStyle = c.bg;
-  rollCtx.fillRect(0, 0, W, H);
-
-  // Rows
-  for (let m = maxMidi; m >= minMidi; m--) {
-    const y = midiY(m, H);
-    const ni = ((m % 12) + 12) % 12;
-    const isBlack = [1,3,6,8,10].includes(ni);
-    const isC = ni === 0;
-
-    rollCtx.fillStyle = isBlack ? "rgba(128,128,128,0.05)" : "rgba(128,128,128,0.1)";
-    rollCtx.fillRect(kbW, y, W - kbW, rowH);
-
-    rollCtx.strokeStyle = isC ? c.accent + "40" : c.grid;
-    rollCtx.lineWidth = isC ? 1.2 : 0.8;
-    rollCtx.beginPath();
-    rollCtx.moveTo(kbW, y);
-    rollCtx.lineTo(W, y);
-    rollCtx.stroke();
-
-    // Key
-    rollCtx.fillStyle = isBlack ? "rgba(0,0,0,0.3)" : "rgba(255,255,255,0.06)";
-    rollCtx.fillRect(0, y + 1, kbW - 6, Math.max(1, rowH - 2));
-
-    if (isBlack) {
-      rollCtx.fillStyle = "rgba(0,0,0,0.5)";
-      rollCtx.fillRect(0, y + 2, kbW * 0.6, Math.max(1, rowH - 4));
-    }
-
-    if (ni === 0 || ni === 4 || ni === 7) {
-      rollCtx.fillStyle = c.text;
-      rollCtx.font = `600 ${W < 500 ? 9 : 10}px system-ui`;
-      rollCtx.textAlign = "right";
-      rollCtx.textBaseline = "middle";
-      rollCtx.fillText(noteNameStr(m), kbW - 12, y + rowH / 2);
-    }
-  }
-
-  // Separator
-  rollCtx.fillStyle = c.grid;
-  rollCtx.fillRect(kbW - 6, 0, 1, H);
-
-  // Time grid
-  rollCtx.strokeStyle = c.grid;
-  rollCtx.lineWidth = 0.7;
-  for (let s = 0; s <= ROLL_WINDOW / 1000; s += 2) {
-    const x = pL + pW - (s * 1000 / ROLL_WINDOW) * pW;
-    rollCtx.beginPath(); rollCtx.moveTo(x, 0); rollCtx.lineTo(x, H); rollCtx.stroke();
-  }
-
-  rollCtx.fillStyle = c.text;
-  rollCtx.font = `600 ${W < 500 ? 9 : 10}px system-ui`;
-  rollCtx.textAlign = "right"; rollCtx.textBaseline = "top";
-  rollCtx.fillText("now", pL + pW - 30, 8);
-  rollCtx.textAlign = "left";
-  rollCtx.fillText(`-${ROLL_WINDOW / 1000}s`, pL + 8, 8);
-
-  // Pitch path
   const pts = timeline.filter(p => p.midi >= minMidi && p.midi <= maxMidi);
   if (!pts.length) {
     rollCtx.fillStyle = c.text;
@@ -285,51 +314,66 @@ function drawRoll() {
   }
 
   rollCtx.lineCap = "round"; rollCtx.lineJoin = "round";
+  drawBezierPath(pts, pL, pW, H, now, c.accent + "30", 6);
+  drawBezierPath(pts, pL, pW, H, now, c.accent + "e0", 2);
 
-  // Glow stroke
-  rollCtx.strokeStyle = c.accent + "30";
-  rollCtx.lineWidth = 6;
-  strokePath(pts, pL, pW, H, now);
-
-  // Main stroke
-  rollCtx.strokeStyle = c.accent + "e0";
-  rollCtx.lineWidth = 2;
-  strokePath(pts, pL, pW, H, now);
-
-  // Current dot
   const last = pts[pts.length - 1];
   const lx = ptX(last.time, pL, pW, now);
   const ly = midiCY(last.midi, H);
   rollCtx.fillStyle = c.accent;
   rollCtx.beginPath(); rollCtx.arc(lx, ly, 3.5, 0, Math.PI * 2); rollCtx.fill();
 
-  // Label
   const label = noteNameStr(Math.round(last.midi));
   rollCtx.font = `700 ${W < 500 ? 10 : 11}px system-ui`;
   const tw = rollCtx.measureText(label).width;
   const bx = clamp(lx + 10, pL + 4, pL + pW - tw - 20);
   const by = clamp(ly - 28, 6, H - 30);
-  rollCtx.fillStyle = c.bg;
-  rollCtx.globalAlpha = 0.85;
+  rollCtx.fillStyle = c.bg; rollCtx.globalAlpha = 0.85;
   rollCtx.fillRect(bx, by, tw + 16, 22);
   rollCtx.globalAlpha = 1;
-  rollCtx.strokeStyle = c.accent;
-  rollCtx.lineWidth = 1;
+  rollCtx.strokeStyle = c.accent; rollCtx.lineWidth = 1;
   rollCtx.strokeRect(bx, by, tw + 16, 22);
   rollCtx.fillStyle = c.accent;
   rollCtx.textAlign = "left"; rollCtx.textBaseline = "middle";
   rollCtx.fillText(label, bx + 8, by + 11);
 }
 
-function strokePath(pts, pL, pW, H, now) {
+function drawBezierPath(pts, pL, pW, H, now, color, lineWidth) {
+  rollCtx.strokeStyle = color;
+  rollCtx.lineWidth = lineWidth;
   rollCtx.beginPath();
-  let prev;
+  let segments = [];
+  let seg = [];
   for (const p of pts) {
-    const x = ptX(p.time, pL, pW, now);
-    const y = midiCY(p.midi, H);
-    if (!prev || p.time - prev.time > 350) rollCtx.moveTo(x, y);
-    else rollCtx.lineTo(x, y);
-    prev = p;
+    if (seg.length && p.time - seg[seg.length - 1].time > 350) {
+      segments.push(seg);
+      seg = [];
+    }
+    seg.push(p);
+  }
+  if (seg.length) segments.push(seg);
+
+  for (const s of segments) {
+    if (s.length < 2) {
+      const x = ptX(s[0].time, pL, pW, now);
+      const y = midiCY(s[0].midi, H);
+      rollCtx.moveTo(x, y);
+      rollCtx.lineTo(x + 0.5, y);
+      continue;
+    }
+    const x0 = ptX(s[0].time, pL, pW, now);
+    const y0 = midiCY(s[0].midi, H);
+    rollCtx.moveTo(x0, y0);
+    for (let i = 1; i < s.length; i++) {
+      const x1 = ptX(s[i - 1].time, pL, pW, now);
+      const y1 = midiCY(s[i - 1].midi, H);
+      const x2 = ptX(s[i].time, pL, pW, now);
+      const y2 = midiCY(s[i].midi, H);
+      const cx = (x1 + x2) / 2;
+      rollCtx.quadraticCurveTo(x1, y1, cx, (y1 + y2) / 2);
+    }
+    const last = s[s.length - 1];
+    rollCtx.lineTo(ptX(last.time, pL, pW, now), midiCY(last.midi, H));
   }
   rollCtx.stroke();
 }
@@ -337,153 +381,117 @@ function strokePath(pts, pL, pW, H, now) {
 function ptX(t, pL, pW, now) { return pL + ((t - (now - ROLL_WINDOW)) / ROLL_WINDOW) * pW; }
 function midiY(m, H) { return ((maxMidi - m) / (maxMidi - minMidi + 1)) * H; }
 function midiCY(m, H) { return ((maxMidi - m + 0.5) / (maxMidi - minMidi + 1)) * H; }
-function noteNameStr(m) { return `${NOTE_NAMES[((m % 12) + 12) % 12]}${(m / 12 | 0) - 1}`; }
-
-/* ═══════════════════════════════════════════
-   HELPERS
-   ═══════════════════════════════════════════ */
-
-function getRms(s) { let s2 = 0; for (const v of s) s2 += v * v; return Math.sqrt(s2 / s.length); }
-
-function freqToNote(f) {
-  const m = Math.round(69 + 12 * Math.log2(f / 440));
-  return { midi: m, name: `${NOTE_NAMES[((m % 12) + 12) % 12]}${(m / 12 | 0) - 1}` };
-}
-
-function noteToFreq(m) { return 440 * 2 ** ((m - 69) / 12); }
-
-function fmtCents(c) {
-  if (Math.abs(c) <= 5) return "非常准";
-  return c > 0 ? `偏高 ${c}` : `偏低 ${Math.abs(c)}`;
-}
-
-function fmtStability(v) {
-  if (v.length < 6) return "采样中";
-  const avg = v.reduce((a, b) => a + b, 0) / v.length;
-  const dev = Math.sqrt(v.reduce((a, b) => a + (b - avg) ** 2, 0) / v.length);
-  return dev <= 6 ? "很稳定" : dev <= 14 ? "较稳定" : "波动明显";
-}
-
-function clamp(v, lo, hi) { return Math.min(Math.max(v, lo), hi); }
-
-function setStatus(msg, err) {
-  statusText.textContent = msg;
-  statusText.style.color = err ? "var(--red)" : "var(--text-2)";
-}
-
-function showNoPitch(msg) {
-  noteName.textContent = "--";
-  frequencyValue.textContent = "--";
-  targetFrequency.textContent = "-- Hz";
-  centsText.textContent = "--";
-  stability.textContent = "--";
-  needle.style.left = "50%";
-  pitchHistory.length = 0;
-  setStatus(msg, false);
-}
-
-function resetUI() {
-  noteName.textContent = "--";
-  frequencyValue.textContent = "--";
-  centsText.textContent = "--";
-  targetFrequency.textContent = "-- Hz";
-  stability.textContent = "--";
-  volume.textContent = "--";
-  needle.style.left = "50%";
-  smoothedFreq = null;
-  smoothedCents = null;
-}
-
-function recordPoint(f, rms) {
-  const m = 69 + 12 * Math.log2(f / 440);
-  const now = performance.now();
-  timeline.push({ midi: m, frequency: f, rms, time: now });
-  trimTimeline(now);
-}
-
-function trimTimeline(now) {
-  while (timeline.length && timeline[0].time < now - ROLL_WINDOW) timeline.shift();
-}
-
-function clearRoll() { timeline.length = 0; drawRoll(); }
+function noteNameStr(m) { return NOTE_NAMES[((m % 12) + 12) % 12] + ((m / 12 | 0) - 1); }
 
 /* ═══════════════════════════════════════════
    PIANO KEY PLAYBACK
    ═══════════════════════════════════════════ */
-
 function playKey(e) {
   const rect = pitchRoll.getBoundingClientRect();
-  const x = e.clientX - rect.left, y = e.clientY - rect.top;
-  if (x > lastLayout.kbW - 6) return;
-  const rowH = lastLayout.h / (maxMidi - minMidi + 1);
-  const idx = clamp(Math.floor(y / rowH), 0, maxMidi - minMidi);
-  const midi = maxMidi - idx;
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  const kbW = lastLayout.kbW;
+  const clickW = window.innerWidth < 500 ? kbW + 24 : kbW + 12;
+  if (x > clickW) return;
+  const midi = yToMidi(y, lastLayout.h);
+  playRefNote(midi);
+  setStatus("参考音：" + noteNameStr(midi) + " " + noteToFreq(midi).toFixed(1) + " Hz", false);
+}
 
-  refAudioCtx ??= new AudioContext();
+function yToMidi(y, H) {
+  const rowH = H / (maxMidi - minMidi + 1);
+  return maxMidi - clamp(Math.floor(y / rowH), 0, maxMidi - minMidi);
+}
+
+function playRefNote(midi) {
+  refAudioCtx = refAudioCtx || new AudioContext();
   if (refAudioCtx.state === "suspended") refAudioCtx.resume();
-
   const osc = refAudioCtx.createOscillator();
   const gain = refAudioCtx.createGain();
   const t = refAudioCtx.currentTime;
   osc.type = "sine";
   osc.frequency.setValueAtTime(noteToFreq(midi), t);
   gain.gain.setValueAtTime(0.0001, t);
-  gain.gain.exponentialRampToValueAtTime(0.15, t + 0.02);
-  gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.55);
+  gain.gain.exponentialRampToValueAtTime(0.18, t + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.62);
   osc.connect(gain); gain.connect(refAudioCtx.destination);
-  osc.start(t); osc.stop(t + 0.6);
-
-  setStatus(`参考音：${noteNameStr(midi)}`, false);
+  osc.start(t); osc.stop(t + 0.65);
 }
 
 /* ═══════════════════════════════════════════
-   RANGE SWITCH
+   HELPERS
    ═══════════════════════════════════════════ */
-
-function setRange(e) {
-  const r = RANGES[e.target.dataset.range];
-  if (!r) return;
-  minMidi = r.min; maxMidi = r.max;
-  $$(".pill").forEach(b => b.classList.toggle("active", b === e.target));
-  drawRoll();
+function getRms(s) { let s2 = 0; for (const v of s) s2 += v * v; return Math.sqrt(s2 / s.length); }
+function freqToNote(f) { const m = Math.round(69 + 12 * Math.log2(f / 440)); return { midi: m, name: NOTE_NAMES[((m % 12) + 12) % 12] + ((m / 12 | 0) - 1) }; }
+function noteToFreq(m) { return 440 * 2 ** ((m - 69) / 12); }
+function fmtCents(c) { return Math.abs(c) <= 5 ? "非常准" : (c > 0 ? "偏高 " + c : "偏低 " + Math.abs(c)); }
+function fmtStability(v) {
+  if (v.length < 6) return "采样中";
+  const avg = v.reduce((a, b) => a + b, 0) / v.length;
+  const dev = Math.sqrt(v.reduce((a, b) => a + (b - avg) ** 2, 0) / v.length);
+  return dev <= 6 ? "很稳定" : dev <= 14 ? "较稳定" : "波动明显";
 }
+function clamp(v, lo, hi) { return Math.min(Math.max(v, lo), hi); }
+function setStatus(msg, err) { statusText.textContent = msg; statusText.style.color = err ? "var(--red)" : "var(--text-2)"; }
+function showNoPitch(msg) { noteName.textContent = "--"; frequencyValue.textContent = "--"; targetFrequency.textContent = "-- Hz"; centsText.textContent = "--"; stability.textContent = "--"; needle.style.left = "50%"; pitchHistory.length = 0; setStatus(msg, false); }
+function resetUI() { noteName.textContent = "--"; frequencyValue.textContent = "--"; centsText.textContent = "--"; targetFrequency.textContent = "-- Hz"; stability.textContent = "--"; volume.textContent = "--"; volumeBar.style.width = "0%"; needle.style.left = "50%"; smoothedFreq = null; smoothedCents = null; statHighMidi = -Infinity; statLowMidi = Infinity; statSumFreq = 0; statCount = 0; updateStats(); }
+function recordPoint(f, rms) { timeline.push({ midi: 69 + 12 * Math.log2(f / 440), frequency: f, rms, time: performance.now() }); trimTimeline(); }
 
-/* ═══════════════════════════════════════════
-   THEME
-   ═══════════════════════════════════════════ */
+function updateStats() {
+  const highEl = $("#statHigh"), highHz = $("#statHighHz");
+  const lowEl = $("#statLow"), lowHz = $("#statLowHz");
+  const avgEl = $("#statAvg"), avgHz = $("#statAvgHz");
+  const spanEl = $("#statSpan"), spanNote = $("#statSpanNote");
 
-function applyTheme(t) {
-  document.documentElement.setAttribute("data-theme", t);
-  localStorage.setItem("vocal-theme", t);
+  if (statCount === 0) {
+    highEl.textContent = "--"; highHz.textContent = "--";
+    lowEl.textContent = "--"; lowHz.textContent = "--";
+    avgEl.textContent = "--"; avgHz.textContent = "--";
+    spanEl.textContent = "--"; spanNote.textContent = "--";
+    return;
+  }
+
+  const highName = noteNameStr(statHighMidi);
+  const lowName = noteNameStr(statLowMidi);
+  const avgFreq = statSumFreq / statCount;
+  const avgMidi = Math.round(69 + 12 * Math.log2(avgFreq / 440));
+  const avgName = noteNameStr(avgMidi);
+  const spanSemitones = statHighMidi - statLowMidi;
+  const spanOctaves = (spanSemitones / 12).toFixed(1);
+
+  highEl.textContent = highName;
+  highHz.textContent = noteToFreq(statHighMidi).toFixed(1) + " Hz";
+  lowEl.textContent = lowName;
+  lowHz.textContent = noteToFreq(statLowMidi).toFixed(1) + " Hz";
+  avgEl.textContent = avgName;
+  avgHz.textContent = avgFreq.toFixed(1) + " Hz";
+  spanEl.textContent = spanSemitones + " 半音";
+  spanNote.textContent = "约 " + spanOctaves + " 个八度";
 }
-
-$("#themeToggle").addEventListener("click", () => {
-  applyTheme(document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light");
-});
-
-const saved = localStorage.getItem("vocal-theme");
-if (saved) applyTheme(saved);
-
-/* ═══════════════════════════════════════════
-   SCROLL REVEAL
-   ═══════════════════════════════════════════ */
-
-const observer = new IntersectionObserver((entries) => {
-  entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add("visible"); observer.unobserve(e.target); } });
-}, { threshold: 0.1, rootMargin: "0px 0px -30px 0px" });
-
-$$(".hero, .tuner-panel, .roll-section, .tips-section").forEach(el => observer.observe(el));
+function clearPitchRoll() { timeline.length = 0; bgCache = null; drawRoll(); }
+function trimTimeline() { const now = performance.now(); while (timeline.length && timeline[0].time < now - ROLL_WINDOW) timeline.shift(); }
 
 /* ═══════════════════════════════════════════
    EVENTS
    ═══════════════════════════════════════════ */
-
 startButton.addEventListener("click", start);
 stopButton.addEventListener("click", stop);
-clearRollButton.addEventListener("click", clearRoll);
-pitchRoll.addEventListener("pointerdown", playKey);
+clearRollButton.addEventListener("click", clearPitchRoll);
 window.addEventListener("resize", resizeRoll);
-$$(".pill").forEach(b => b.addEventListener("click", setRange));
+pitchRoll.addEventListener("pointerdown", playKey);
+$$(".pill").forEach(b => b.addEventListener("click", () => {
+  const r = RANGES[b.dataset.range];
+  if (!r) return;
+  minMidi = r.min; maxMidi = r.max;
+  $$(".pill").forEach(p => p.classList.toggle("active", p === b));
+  bgCache = null;
+}));
 
 resizeRoll();
 rollAnimId = requestAnimationFrame(tickRoll);
+
+/* ─── Scroll Reveal ─── */
+const revealObs = new IntersectionObserver((entries) => {
+  entries.forEach((e) => { if (e.isIntersecting) { e.target.classList.add("visible"); revealObs.unobserve(e.target); } });
+}, { threshold: 0.1, rootMargin: "0px 0px -30px 0px" });
+$$(".hero, .roll-section, .stats-section, .tips-section, .tuner-panel").forEach((el) => revealObs.observe(el));

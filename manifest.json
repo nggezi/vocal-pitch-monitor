@@ -1,0 +1,16 @@
+{
+  "name": "Vocal Studio - 实时练唱音高监测",
+  "short_name": "Vocal Studio",
+  "description": "实时音高监测，像 Auto-Tune 一样记录音高轨迹",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0c0e16",
+  "theme_color": "#0c0e16",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='45' fill='%238effd2'/><text y='.9em' x='50' text-anchor='middle' font-size='65'>♪</text></svg>",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
