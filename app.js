@@ -31,7 +31,7 @@ const RANGES = {
   wide: { min: 33, max: 93 },
 };
 const SMOOTH = 0.15, CENTS_SMOOTH = 0.2, VOLUME_THR = 0.003;
-const HOLD_MS = 400, JUMP_CENTS = 600, ROLL_WINDOW = 14000;
+const HOLD_MS = 800, JUMP_CENTS = 600, ROLL_WINDOW = 14000;
 
 /* ─── State ─── */
 let audioCtx, analyser, mic, stream, buffer;
@@ -172,7 +172,21 @@ function detect() {
   volumeBar.style.width = volPct + "%";
 
   const now = performance.now();
-  const raw = yin(buffer, audioCtx.sampleRate);
+
+  // Normalize buffer so close-mic loud signals don't distort pitch detection
+  let peak = 0;
+  for (let i = 0; i < buffer.length; i++) {
+    const abs = Math.abs(buffer[i]);
+    if (abs > peak) peak = abs;
+  }
+  let raw;
+  if (peak > 0.5) {
+    const scale = 0.5 / peak;
+    for (let i = 0; i < buffer.length; i++) buffer[i] *= scale;
+    raw = yin(buffer, audioCtx.sampleRate);
+  } else {
+    raw = yin(buffer, audioCtx.sampleRate);
+  }
   const hasVoice = raw !== null && raw >= 40 && raw <= 2000 && rms >= VOLUME_THR;
 
   if (hasVoice) {
