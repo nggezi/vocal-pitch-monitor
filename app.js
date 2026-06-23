@@ -30,7 +30,7 @@ const RANGES = {
   alto: { min: 48, max: 81 }, soprano: { min: 55, max: 88 },
   wide: { min: 33, max: 93 },
 };
-const SMOOTH = 0.15, CENTS_SMOOTH = 0.2, VOLUME_THR = 0.003;
+const SMOOTH = 0.10, CENTS_SMOOTH = 0.12, VOLUME_THR = 0.002;
 const HOLD_MS = 800, JUMP_CENTS = 600, ROLL_WINDOW = 14000;
 
 /* ─── State ─── */
@@ -180,8 +180,8 @@ function detect() {
     if (abs > peak) peak = abs;
   }
   let raw;
-  if (peak > 0.5) {
-    const scale = 0.5 / peak;
+  if (peak > 0.8) {
+    const scale = 0.8 / peak;
     for (let i = 0; i < buffer.length; i++) buffer[i] *= scale;
     raw = yin(buffer, audioCtx.sampleRate);
   } else {
