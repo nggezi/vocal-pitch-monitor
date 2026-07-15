@@ -1,4 +1,4 @@
-const CACHE = "vocal-studio-v2";
+const CACHE = "vocal-studio-v3";
 const ASSETS = ["./", "./index.html", "./style.css", "./app.js", "./manifest.json"];
 
 self.addEventListener("install", (e) => {

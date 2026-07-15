@@ -142,13 +142,15 @@ body {
   position: relative;
   overflow: hidden;
   transition: border-color 0.4s ease;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 .tuner-shell:hover, .roll-shell:hover, .tips-shell:hover {
   border-color: var(--border-focus);
 }
 
 .tuner-core, .roll-core, .tips-core {
-  background: var(--core);
+  background: rgba(18,21,31,0.85);
   border-radius: calc(var(--r-xl) - 2px);
   position: relative;
   overflow: hidden;
@@ -597,3 +599,4 @@ body {
   .stats-grid { grid-template-columns: 1fr 1fr; }
   #pitchRoll { height: 360px; min-height: 360px; }
 }
+

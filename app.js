@@ -30,8 +30,9 @@ const RANGES = {
   alto: { min: 48, max: 81 }, soprano: { min: 55, max: 88 },
   wide: { min: 33, max: 93 },
 };
-const SMOOTH = 0.10, CENTS_SMOOTH = 0.12, VOLUME_THR = 0.002;
-const HOLD_MS = 800, JUMP_CENTS = 600, ROLL_WINDOW = 14000;
+const SMOOTH = 0.15, CENTS_SMOOTH = 0.15, VOLUME_THR = 0.0015;
+const HOLD_MS = 600, JUMP_CENTS = 150, ROLL_WINDOW = 14000;
+const MEDIAN_WINDOW = 3;
 
 /* ─── State ─── */
 let audioCtx, analyser, mic, stream, buffer;
@@ -41,6 +42,7 @@ let smoothedFreq = null, smoothedCents = null, lastPitchTime = 0;
 let minMidi = RANGES.tenor.min, maxMidi = RANGES.tenor.max;
 const pitchHistory = [];
 const timeline = [];
+let freqBuffer = [];
 let lastLayout = { kbW: 72, h: 430 };
 let bgCache = null, bgCacheKey = "";
 
@@ -111,6 +113,8 @@ function yin(samples, sr) {
    CORE LOOP
    ═══════════════════════════════════════════ */
 async function start() {
+  // Debug: indicate that start button was clicked
+  setStatus("开始监听已点击", false);
   if (!navigator.mediaDevices?.getUserMedia) {
     setStatus("当前浏览器不支持麦克风采集。请使用 Chrome / Edge / Safari 16+。", true);
     return;
@@ -152,6 +156,7 @@ function stop() {
   pitchHistory.length = 0;
   smoothedFreq = null;
   smoothedCents = null;
+  freqBuffer = [];
   mic?.disconnect();
   stream?.getTracks().forEach(t => t.stop());
   audioCtx?.close();
@@ -191,11 +196,27 @@ function detect() {
 
   if (hasVoice) {
     lastPitchTime = now;
-    if (smoothedFreq !== null) {
-      const jc = Math.abs(1200 * Math.log2(raw / smoothedFreq));
-      if (jc > JUMP_CENTS) { animId = requestAnimationFrame(detect); return; }
+    freqBuffer.push(raw);
+    if (freqBuffer.length < MEDIAN_WINDOW) {
+      animId = requestAnimationFrame(detect);
+      return;
     }
-    smoothedFreq = smoothedFreq === null ? raw : smoothedFreq + SMOOTH * (raw - smoothedFreq);
+    // Compute median
+    const sorted = [...freqBuffer].sort((a,b)=>a-b);
+    const median = sorted[Math.floor(sorted.length/2)];
+    freqBuffer.shift(); // remove oldest for next window
+
+    // Jump check using median and smoothedFreq
+    if (smoothedFreq !== null) {
+      const jc = Math.abs(1200 * Math.log2(median / smoothedFreq));
+      if (jc > JUMP_CENTS) {
+        animId = requestAnimationFrame(detect);
+        return;
+      }
+    }
+
+    // Update smoothedFreq and smoothedCents with median
+    smoothedFreq = smoothedFreq === null ? median : smoothedFreq + SMOOTH * (median - smoothedFreq);
     const note = freqToNote(smoothedFreq);
     const target = noteToFreq(note.midi);
     const cents = 1200 * Math.log2(smoothedFreq / target);
@@ -220,10 +241,13 @@ function detect() {
     setStatus("正在监听。", false);
   } else if (smoothedFreq !== null && now - lastPitchTime < HOLD_MS) {
     recordPoint(smoothedFreq, rms);
+    // Reset buffer when we lose voice but are holding the last pitch
+    freqBuffer = [];
   } else {
     showNoPitch(rms < VOLUME_THR ? "音量太小，请靠近麦克风。" : "暂未检测到音高。");
     smoothedFreq = null;
     smoothedCents = null;
+    freqBuffer = []; // reset buffer when we lose voice
   }
   animId = requestAnimationFrame(detect);
 }
