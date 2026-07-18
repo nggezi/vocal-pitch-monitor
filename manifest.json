@@ -6,11 +6,20 @@
   "display": "standalone",
   "background_color": "#0c0e16",
   "theme_color": "#0c0e16",
+  "lang": "zh-CN",
+  "categories": ["music", "education", "utilities"],
   "icons": [
     {
-      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='45' fill='%238effd2'/><text y='.9em' x='50' text-anchor='middle' font-size='65'>♪</text></svg>",
-      "sizes": "any",
-      "type": "image/svg+xml"
+      "src": "icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
     }
   ]
 }

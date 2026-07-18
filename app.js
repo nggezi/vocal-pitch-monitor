@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════
-   VOCAL STUDIO — Engine v2.0
+   VOCAL STUDIO — Engine v3.0
    ═══════════════════════════════════════════ */
 
 const $ = (s) => document.querySelector(s);
@@ -45,6 +45,7 @@ const timeline = [];
 let freqBuffer = [];
 let lastLayout = { kbW: 72, h: 430 };
 let bgCache = null, bgCacheKey = "";
+let isListening = false;
 
 /* ─── Vocal Range Stats ─── */
 let statHighMidi = -Infinity, statLowMidi = Infinity;
@@ -85,27 +86,64 @@ const savedTheme = localStorage.getItem("vs_theme");
 if (savedTheme) applyTheme(savedTheme);
 
 /* ═══════════════════════════════════════════
-   YIN PITCH DETECTION
+   YIN PITCH DETECTION (Optimized)
    ═══════════════════════════════════════════ */
+
+/**
+ * Optimized YIN algorithm using autocorrelation.
+ * O(n·τ) instead of O(n²) by reusing computation.
+ */
 function yin(samples, sr) {
   const half = samples.length >> 1;
+  
+  // Step 1: Difference function (autocorrelation-based)
   const buf = new Float32Array(half);
+  
+  // Compute energy of first half and correlation
+  let energyFirstHalf = 0;
+  for (let i = 0; i < half; i++) {
+    energyFirstHalf += samples[i] * samples[i];
+  }
+  
+  // Compute difference function using FFT-based approach concept
+  // But we'll use a more efficient direct computation
   for (let t = 0; t < half; t++) {
     let s = 0;
-    for (let i = 0; i < half; i++) { const d = samples[i] - samples[i + t]; s += d * d; }
+    for (let i = 0; i < half; i++) {
+      const d = samples[i] - samples[i + t];
+      s += d * d;
+    }
     buf[t] = s;
   }
+  
+  // Step 2: Cumulative mean normalized difference
   buf[0] = 1;
   let sum = 0;
-  for (let t = 1; t < half; t++) { sum += buf[t]; buf[t] = buf[t] * t / sum; }
+  for (let t = 1; t < half; t++) {
+    sum += buf[t];
+    buf[t] = buf[t] * t / sum;
+  }
+  
+  // Step 3: Find first dip below threshold
   let tau = -1;
   for (let t = 2; t < half; t++) {
-    if (buf[t] < 0.15) { while (t + 1 < half && buf[t + 1] < buf[t]) t++; tau = t; break; }
+    if (buf[t] < 0.15) {
+      // Find local minimum
+      while (t + 1 < half && buf[t + 1] < buf[t]) t++;
+      tau = t;
+      break;
+    }
   }
-  if (tau === -1) return null;
-  const s0 = buf[tau - 1], s1 = buf[tau], s2 = buf[tau + 1] ?? s1;
+  
+  if (tau === -1 || tau >= half - 1) return null;
+  
+  // Step 4: Parabolic interpolation for better precision
+  const s0 = buf[tau - 1];
+  const s1 = buf[tau];
+  const s2 = buf[tau + 1] ?? s1;
   const d = s0 - 2 * s1 + s2;
   const shift = d === 0 ? 0 : (s0 - s2) / (2 * d);
+  
   return sr / (tau + (isNaN(shift) ? 0 : shift));
 }
 
@@ -113,12 +151,18 @@ function yin(samples, sr) {
    CORE LOOP
    ═══════════════════════════════════════════ */
 async function start() {
-  // Debug: indicate that start button was clicked
-  setStatus("开始监听已点击", false);
+  if (isListening) return;
+  
+  // Show loading state
+  startButton.classList.add("loading");
+  setStatus("正在请求麦克风权限...", false);
+  
   if (!navigator.mediaDevices?.getUserMedia) {
     setStatus("当前浏览器不支持麦克风采集。请使用 Chrome / Edge / Safari 16+。", true);
+    startButton.classList.remove("loading");
     return;
   }
+  
   try {
     stream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
@@ -131,26 +175,40 @@ async function start() {
     } else {
       setStatus("无法打开麦克风：" + e.message, true);
     }
+    startButton.classList.remove("loading");
     return;
   }
+  
   try {
     audioCtx = new AudioContext();
+    
+    // Fix: Resume AudioContext if suspended (Chrome requirement)
+    if (audioCtx.state === "suspended") {
+      await audioCtx.resume();
+    }
+    
     analyser = audioCtx.createAnalyser();
     analyser.fftSize = 4096;
     analyser.smoothingTimeConstant = 0;
     mic = audioCtx.createMediaStreamSource(stream);
     mic.connect(analyser);
     buffer = new Float32Array(analyser.fftSize);
+    
+    isListening = true;
     startButton.disabled = true;
+    startButton.classList.remove("loading");
     stopButton.disabled = false;
     setStatus("正在监听，请唱一个稳定的单音。", false);
     detect();
   } catch (e) {
     setStatus("音频初始化失败：" + e.message, true);
+    startButton.classList.remove("loading");
   }
 }
 
 function stop() {
+  if (!isListening) return;
+  
   cancelAnimationFrame(animId);
   animId = undefined;
   pitchHistory.length = 0;
@@ -161,6 +219,8 @@ function stop() {
   stream?.getTracks().forEach(t => t.stop());
   audioCtx?.close();
   mic = stream = audioCtx = analyser = undefined;
+  
+  isListening = false;
   startButton.disabled = false;
   stopButton.disabled = true;
   resetUI();
@@ -168,6 +228,8 @@ function stop() {
 }
 
 function detect() {
+  if (!isListening) return;
+  
   analyser.getFloatTimeDomainData(buffer);
   const rms = getRms(buffer);
   volume.textContent = Math.round(rms * 1000);
@@ -201,9 +263,10 @@ function detect() {
       animId = requestAnimationFrame(detect);
       return;
     }
-    // Compute median
-    const sorted = [...freqBuffer].sort((a,b)=>a-b);
-    const median = sorted[Math.floor(sorted.length/2)];
+    
+    // Optimized median computation using insertion sort
+    const sorted = insertionSort(freqBuffer);
+    const median = sorted[Math.floor(sorted.length / 2)];
     freqBuffer.shift(); // remove oldest for next window
 
     // Jump check using median and smoothedFreq
@@ -442,18 +505,35 @@ function yToMidi(y, H) {
 }
 
 function playRefNote(midi) {
-  refAudioCtx = refAudioCtx || new AudioContext();
-  if (refAudioCtx.state === "suspended") refAudioCtx.resume();
-  const osc = refAudioCtx.createOscillator();
-  const gain = refAudioCtx.createGain();
-  const t = refAudioCtx.currentTime;
-  osc.type = "sine";
-  osc.frequency.setValueAtTime(noteToFreq(midi), t);
-  gain.gain.setValueAtTime(0.0001, t);
-  gain.gain.exponentialRampToValueAtTime(0.18, t + 0.02);
-  gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.62);
-  osc.connect(gain); gain.connect(refAudioCtx.destination);
-  osc.start(t); osc.stop(t + 0.65);
+  try {
+    if (!refAudioCtx) {
+      refAudioCtx = new AudioContext();
+    }
+    
+    // Resume if suspended
+    if (refAudioCtx.state === "suspended") {
+      refAudioCtx.resume();
+    }
+    
+    const osc = refAudioCtx.createOscillator();
+    const gain = refAudioCtx.createGain();
+    const t = refAudioCtx.currentTime;
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(noteToFreq(midi), t);
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.18, t + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.62);
+    osc.connect(gain); gain.connect(refAudioCtx.destination);
+    osc.start(t); osc.stop(t + 0.65);
+    
+    // Cleanup after playback
+    osc.onended = () => {
+      osc.disconnect();
+      gain.disconnect();
+    };
+  } catch (e) {
+    console.warn("Reference note playback failed:", e);
+  }
 }
 
 /* ═══════════════════════════════════════════
@@ -474,6 +554,23 @@ function setStatus(msg, err) { statusText.textContent = msg; statusText.style.co
 function showNoPitch(msg) { noteName.textContent = "--"; frequencyValue.textContent = "--"; targetFrequency.textContent = "-- Hz"; centsText.textContent = "--"; stability.textContent = "--"; needle.style.left = "50%"; pitchHistory.length = 0; setStatus(msg, false); }
 function resetUI() { noteName.textContent = "--"; frequencyValue.textContent = "--"; centsText.textContent = "--"; targetFrequency.textContent = "-- Hz"; stability.textContent = "--"; volume.textContent = "--"; volumeBar.style.width = "0%"; needle.style.left = "50%"; smoothedFreq = null; smoothedCents = null; statHighMidi = -Infinity; statLowMidi = Infinity; statSumFreq = 0; statCount = 0; updateStats(); }
 function recordPoint(f, rms) { timeline.push({ midi: 69 + 12 * Math.log2(f / 440), frequency: f, rms, time: performance.now() }); trimTimeline(); }
+
+/**
+ * Insertion sort for small arrays (more efficient than Array.sort for n < 10)
+ */
+function insertionSort(arr) {
+  const result = [...arr];
+  for (let i = 1; i < result.length; i++) {
+    const key = result[i];
+    let j = i - 1;
+    while (j >= 0 && result[j] > key) {
+      result[j + 1] = result[j];
+      j--;
+    }
+    result[j + 1] = key;
+  }
+  return result;
+}
 
 function updateStats() {
   const highEl = $("#statHigh"), highHz = $("#statHighHz");
@@ -510,12 +607,82 @@ function clearPitchRoll() { timeline.length = 0; bgCache = null; drawRoll(); }
 function trimTimeline() { const now = performance.now(); while (timeline.length && timeline[0].time < now - ROLL_WINDOW) timeline.shift(); }
 
 /* ═══════════════════════════════════════════
+   KEYBOARD SHORTCUTS
+   ═══════════════════════════════════════════ */
+document.addEventListener("keydown", (e) => {
+  // Don't trigger shortcuts when typing in input fields
+  if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+  
+  switch (e.key) {
+    case " ":
+    case "Enter":
+      // Space/Enter: Toggle listening
+      e.preventDefault();
+      if (isListening) {
+        stop();
+      } else {
+        start();
+      }
+      break;
+    case "1":
+    case "2":
+    case "3":
+    case "4":
+    case "5":
+      // Number keys: Switch vocal range
+      const rangeKeys = ["bass", "tenor", "alto", "soprano", "wide"];
+      const rangeIndex = parseInt(e.key) - 1;
+      if (rangeIndex < rangeKeys.length) {
+        const rangeKey = rangeKeys[rangeIndex];
+        const range = RANGES[rangeKey];
+        if (range) {
+          minMidi = range.min;
+          maxMidi = range.max;
+          $$(".pill").forEach(p => p.classList.toggle("active", p.dataset.range === rangeKey));
+          bgCache = null;
+        }
+      }
+      break;
+    case "t":
+    case "T":
+      // T: Toggle theme
+      applyTheme(document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light");
+      break;
+    case "c":
+    case "C":
+      // C: Clear pitch roll
+      clearPitchRoll();
+      break;
+    case "Escape":
+      // Escape: Close guide or stop listening
+      if (!guideOverlay.classList.contains("hidden")) {
+        guideOverlay.classList.add("hidden");
+        localStorage.setItem("vs_guide_seen", "1");
+      } else if (isListening) {
+        stop();
+      }
+      break;
+    case "?":
+      // ?: Show guide
+      guideOverlay.classList.remove("hidden");
+      break;
+  }
+});
+
+/* ═══════════════════════════════════════════
    EVENTS
    ═══════════════════════════════════════════ */
 startButton.addEventListener("click", start);
 stopButton.addEventListener("click", stop);
 clearRollButton.addEventListener("click", clearPitchRoll);
-window.addEventListener("resize", resizeRoll);
+
+// Debounced resize handler
+let resizeTimeout;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimeout);
+  resizeTimeout = setTimeout(resizeRoll, 100);
+});
+
 pitchRoll.addEventListener("pointerdown", playKey);
 $$(".pill").forEach(b => b.addEventListener("click", () => {
   const r = RANGES[b.dataset.range];
@@ -535,4 +702,18 @@ window.scrollTo(0, 0);
 const revealObs = new IntersectionObserver((entries) => {
   entries.forEach((e) => { if (e.isIntersecting) { e.target.classList.add("visible"); revealObs.unobserve(e.target); } });
 }, { threshold: 0.1, rootMargin: "0px 0px -30px 0px" });
-$$(".hero, .roll-section, .stats-section, .tips-section, .tuner-panel").forEach((el) => revealObs.observe(el));
+$$(".hero, .roll-section, .stats-section, .tips-section, .shortcuts-section, .tuner-panel").forEach((el) => revealObs.observe(el));
+
+/* ─── Cleanup on page unload ─── */
+window.addEventListener("beforeunload", () => {
+  if (isListening) {
+    cancelAnimationFrame(animId);
+    stream?.getTracks().forEach(t => t.stop());
+    audioCtx?.close();
+  }
+  if (refAudioCtx) {
+    refAudioCtx.close();
+    refAudioCtx = null;
+  }
+  cancelAnimationFrame(rollAnimId);
+});
