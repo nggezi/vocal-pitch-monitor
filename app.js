@@ -21,6 +21,9 @@ const pitchRoll = $("#pitchRoll");
 const clearRollButton = $("#clearRollButton");
 const guideOverlay = $("#guideOverlay");
 const guideClose = $("#guideClose");
+const aboutOverlay = $("#aboutOverlay");
+const aboutClose = $("#aboutClose");
+const aboutLink = $("#aboutLink");
 const rollCtx = pitchRoll.getContext("2d");
 
 /* ─── Constants ─── */
@@ -63,6 +66,16 @@ if (!localStorage.getItem("vs_guide_seen")) {
 } else {
   guideOverlay.classList.add("hidden");
 }
+
+/* ═══════════════════════════════════════════
+   ABOUT OVERLAY
+   ═══════════════════════════════════════════ */
+aboutLink.addEventListener("click", () => {
+  aboutOverlay.classList.remove("hidden");
+});
+aboutClose.addEventListener("click", () => {
+  aboutOverlay.classList.add("hidden");
+});
 
 /* ═══════════════════════════════════════════
    PWA
@@ -654,8 +667,10 @@ document.addEventListener("keydown", (e) => {
       clearPitchRoll();
       break;
     case "Escape":
-      // Escape: Close guide or stop listening
-      if (!guideOverlay.classList.contains("hidden")) {
+      // Escape: Close overlays or stop listening
+      if (!aboutOverlay.classList.contains("hidden")) {
+        aboutOverlay.classList.add("hidden");
+      } else if (!guideOverlay.classList.contains("hidden")) {
         guideOverlay.classList.add("hidden");
         localStorage.setItem("vs_guide_seen", "1");
       } else if (isListening) {
@@ -665,6 +680,11 @@ document.addEventListener("keydown", (e) => {
     case "?":
       // ?: Show guide
       guideOverlay.classList.remove("hidden");
+      break;
+    case "a":
+    case "A":
+      // A: Show about
+      aboutOverlay.classList.remove("hidden");
       break;
   }
 });
