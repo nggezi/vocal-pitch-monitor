@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════
-   VOCAL STUDIO — Engine v3.1
+   VOCAL STUDIO — Engine v3.2
    ═══════════════════════════════════════════ */
 
 const $ = (s) => document.querySelector(s);
@@ -33,10 +33,12 @@ const RANGES = {
 const SMOOTH = 0.15;        // 稳态平滑：偏差小时平滑显示
 const FAST_SMOOTH = 0.55;   // 转音快攻：检测到明显跳变时快速收敛
 const YIN_THRESHOLD = 0.15; // YIN 周期稳定性阈值（CMND），越低要求越严格
+const YIN_STRONG_THRESHOLD = 0.05; // 强周期阈值：优先取第一个足够深的谷，跳过弱泛音谷
 const VOLUME_THR = 0.0015;  // 有效声音的 RMS 音量阈值
 const HOLD_MS = 600;        // 短暂无音时保持上一音高的时长
 const JUMP_CENTS = 150;     // 超过此偏差视为转音，触发快攻
-const OCTAVE_CENTS = 900;   // 超过此偏差疑似八度错音，需连续两帧确认
+const OCTAVE_CENTS = 900;   // 超过此偏差疑似八度/泛音跳变
+const OCTAVE_CONFIRM_FRAMES = 3; // 八度/泛音跳变需连续确认的帧数，防止抽动
 const MEDIAN_WINDOW = 3;    // 中值滤波窗口，降低单次检测抖动
 const ROLL_WINDOW = 14000;  // 钢琴窗显示的时间窗口，单位毫秒
 const PITCH_MIN = 55, PITCH_MAX = 1500; // 人声检测频率范围（Hz）
@@ -138,15 +140,28 @@ function yin(samples, sr) {
     if (t >= minTau && buf[t] < minVal) { minVal = buf[t]; minTauFound = t; }
   }
   if (minTauFound === -1 || minVal > YIN_THRESHOLD) return null;
+  // 泛音纠偏：先找第一个足够深的周期谷（<0.05）。
+  // 弱基频信号在半周期/1/3 周期处通常只有 0.06~0.15 的浅谷，
+  // 真正的基频谷深得多，跳过浅谷即可避免把泛音当基频。
   let tau = -1;
   for (let t = minTau; t < maxTau - 1; t++) {
-    if (buf[t] < YIN_THRESHOLD) {
+    if (buf[t] < YIN_STRONG_THRESHOLD) {
       while (t + 1 < maxTau && buf[t + 1] < buf[t]) t++;
       tau = t;
       break;
     }
   }
-  if (tau === -1) tau = minTauFound;
+  if (tau === -1) {
+    // 没有足够深的谷时退回常规阈值，取第一个低于 0.15 的谷
+    for (let t = minTau; t < maxTau - 1; t++) {
+      if (buf[t] < YIN_THRESHOLD) {
+        while (t + 1 < maxTau && buf[t + 1] < buf[t]) t++;
+        tau = t;
+        break;
+      }
+    }
+    if (tau === -1) tau = minTauFound;
+  }
   const s0 = buf[tau - 1] ?? buf[tau], s1 = buf[tau], s2 = buf[tau + 1] ?? s1;
   if (s1 < 1e-6) return { freq: sr / tau, confidence: minVal }; // 完美周期，不插值
   const d = s0 - 2 * s1 + s2;
@@ -265,7 +280,7 @@ function detect() {
     const median = sorted[Math.floor(sorted.length / 2)];
     freqBuffer.shift(); // remove oldest for next window
 
-    // 转音处理：不丢弃跳变帧，而是加快收敛；疑似八度错音需连续两帧确认。
+    // 转音处理：不丢弃跳变帧，而是加快收敛；疑似八度/泛音跳变需连续多帧确认。
     let k = SMOOTH;
     if (smoothedFreq !== null) {
       const jc = Math.abs(1200 * Math.log2(median / smoothedFreq));
@@ -274,13 +289,15 @@ function detect() {
           Math.abs(1200 * Math.log2(median / pendingJumpFreq)) < 60;
         pendingJumpFreq = same ? pendingJumpFreq : median;
         pendingJumpCount = same ? pendingJumpCount + 1 : 1;
-        if (pendingJumpCount < 2) {
-          animId = requestAnimationFrame(detect);
-          return;
+        if (pendingJumpCount < OCTAVE_CONFIRM_FRAMES) {
+          // 确认期间保持当前音高（k=0），防止泛音/倍频误检造成抽动；
+          // 不丢弃帧，轨迹保持连续。
+          k = 0;
+        } else {
+          pendingJumpFreq = null;
+          pendingJumpCount = 0;
+          k = FAST_SMOOTH;
         }
-        pendingJumpFreq = null;
-        pendingJumpCount = 0;
-        k = FAST_SMOOTH;
       } else {
         pendingJumpFreq = null;
         pendingJumpCount = 0;
