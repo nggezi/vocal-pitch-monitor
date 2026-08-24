@@ -4,7 +4,7 @@ Vocal Studio 是一个纯前端的实时练唱音高监测工具。它通过浏�
 
 项目不依赖后端服务，不上传录音数据，适合作为声乐练习、音准训练、发声稳定性观察和前端音频处理学习示例。
 
-> 当前版本：**v3.2**
+> 当前版本：**v3.3**
 
 ## 功能概览
 
@@ -60,6 +60,9 @@ vocal-pitch-monitor/
 ├── index.html         # 页面结构与主要 UI 区块
 ├── style.css          # 视觉样式、主题、响应式布局
 ├── app.js             # 音频检测、音高计算、Canvas 绘制和交互逻辑
+├── pitch.js           # 独立 YIN 检测核心（浏览器 / Node 通用）
+├── test/pitch.test.js # 检测核心回归测试
+├── package.json       # 项目元信息与测试脚本
 ├── manifest.json      # PWA 应用清单
 ├── service-worker.js  # 静态资源缓存逻辑与离线回退
 ├── icon-192.svg       # PWA 图标 192x192
@@ -185,7 +188,7 @@ http://localhost:3001
 1. 使用 `navigator.mediaDevices.getUserMedia()` 请求麦克风输入。
 2. 创建 `AudioContext` 与 `AnalyserNode`，并自动处理 Chrome 的 `resume()` 要求。
 3. 设置 `analyser.fftSize = 4096`，从时域缓冲区读取采样数据。
-4. 计算 RMS 音量，过滤过小声音。
+4. 经 60 Hz 高通滤波后，计算 RMS 音量，过滤过小声音。
 5. YIN 的 CMND 自带幅度归一化，适配不同音量输入。
 6. 使用 YIN 算法估算基频。
 7. 过滤不合理频率范围，只接受约 `55 Hz - 1500 Hz` 的人声结果。
@@ -224,6 +227,15 @@ YIN 是一种常见的单音基频检测算法。当前实现大致包括：
 - YIN 优先寻找第一个足够深的周期谷（CMND < 0.05），跳过半周期/三分之一周期处的浅泛音谷。
 - 八度/泛音级跳变需连续 3 帧确认才采信；确认期间保持当前音高并保持轨迹连续，不再丢帧。
 
+### v3.3 输入优化与工程化
+
+- 麦克风输入增加 60 Hz 高通滤波，滤除电源哼声与低频隆隆声，减少噪声误判。
+- 支持 A4 标准音校准（440/441/442/443 Hz），选择会记忆到 localStorage。
+- 检测循环限频至 30fps，CPU 占用减半；新增削波提示，输入过大时提醒远离麦克风。
+- 从后台切回页面时自动恢复 AudioContext，避免"切回来卡住不更新"。
+- YIN 检测核心抽为独立模块 `pitch.js`，并新增回归测试（`node test/pitch.test.js`）。
+- 宽音域显示上限与检测上限对齐（MIDI 90 / 1500 Hz），消除永远画不出轨迹的空区域。
+
 ## 关键参数
 
 `app.js` 中包含一些影响检测体验的参数：
@@ -232,19 +244,19 @@ YIN 是一种常见的单音基频检测算法。当前实现大致包括：
 | --- | --- | --- |
 | `SMOOTH` | `0.15` | 稳态平滑系数，偏差小时平滑显示 |
 | `FAST_SMOOTH` | `0.55` | 转音快攻系数，偏差大时快速收敛 |
-| `YIN_THRESHOLD` | `0.15` | YIN 周期稳定性阈值（CMND） |
-| `YIN_STRONG_THRESHOLD` | `0.05` | 强周期阈值，用于跳过弱泛音谷 |
 | `VOLUME_THR` | `0.0015` | 有效声音的 RMS 音量阈值 |
+| `LOW_CUT_HZ` | `60` | 麦克风输入低切频率 |
+| `DETECT_FPS` | `30` | 检测循环帧率上限 |
+| `A4` | `440` | A4 标准音，可在界面切换 440–443 Hz |
 | `HOLD_MS` | `600` | 短暂无音高时保持上一音高轨迹的时间 |
 | `JUMP_CENTS` | `150` | 超过此偏差视为转音，触发快攻 |
 | `OCTAVE_CENTS` | `900` | 疑似八度/泛音跳变的阈值 |
 | `OCTAVE_CONFIRM_FRAMES` | `3` | 八度/泛音跳变需连续确认的帧数 |
 | `MEDIAN_WINDOW` | `3` | 中值滤波窗口，用于降低单次检测抖动 |
-| `PITCH_MIN / PITCH_MAX` | `55 / 1500` | 有效检测频率范围（Hz） |
 | `ROLL_WINDOW` | `14000` | 钢琴窗显示的时间窗口，单位毫秒 |
 | `fftSize` | `4096` | AnalyserNode 时域采样缓冲大小 |
 
-这些参数可以根据实际麦克风、声源距离、响应速度偏好进行微调。
+YIN 检测核心参数（`YIN_THRESHOLD`、`YIN_STRONG_THRESHOLD`、`PITCH_MIN / PITCH_MAX`）位于 `pitch.js`，调整后运行 `node test/pitch.test.js` 验证。
 
 ## 数据与隐私
 
@@ -271,7 +283,7 @@ vocal-studio-v6
 缓存资源包括：
 
 ```js
-["./", "./index.html", "./style.css", "./app.js", "./manifest.json", "./icon-192.svg", "./icon-512.svg"]
+["./", "./index.html", "./style.css", "./app.js", "./pitch.js", "./manifest.json", "./icon-192.svg", "./icon-512.svg"]
 ```
 
 更新静态资源后，如果浏览器仍显示旧内容，可以尝试：
@@ -376,7 +388,14 @@ v3.0 新增样式：
 
 主要编辑：
 
-- `app.js`
+- `pitch.js`：YIN 检测核心（阈值、频率范围、选谷逻辑）
+- `app.js`：平滑、滤波、统计与交互逻辑
+
+修改 `pitch.js` 后建议运行回归测试确认没有破坏检测：
+
+```bash
+node test/pitch.test.js
+```
 
 常见修改点：
 
@@ -388,6 +407,22 @@ v3.0 新增样式：
 - 调整中值滤波窗口 `MEDIAN_WINDOW`；
 - 增加新的统计指标；
 - 修改参考音波形或音量包络。
+
+## v3.3 更新日志
+
+### 新功能
+- A4 标准音校准（440/441/442/443 Hz），选择记忆到 localStorage
+- 麦克风输入 60 Hz 高通滤波，滤除电源哼声
+- 输入削波提示，避免过载失真影响检测
+
+### 性能优化
+- 检测循环限频至 30fps，CPU 占用减半
+- 音量条写入去重，减少每帧 DOM 操作
+
+### 稳定性
+- 从后台切回页面时自动恢复 AudioContext
+- YIN 检测核心抽为独立模块并新增回归测试（`node test/pitch.test.js`）
+- 宽音域显示上限对齐检测上限（MIDI 90 / 1500 Hz）
 
 ## v3.2 更新日志
 

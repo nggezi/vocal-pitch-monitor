@@ -67,6 +67,16 @@ vocal-pitch-monitor/
 - 更新 Service Worker 缓存版本至 `vocal-studio-v3`。
 - 版本号更新至 v2.2。
 
+## 最近更新（v3.3）
+- 麦克风输入增加 60 Hz 高通滤波，滤除电源哼声与低频隆隆声，减少噪声误判。
+- 支持 A4 标准音校准（440/441/442/443 Hz），选择记忆到 localStorage。
+- 检测循环限频至 30fps，CPU 占用减半；新增输入削波提示。
+- 从后台切回页面时自动恢复 AudioContext。
+- YIN 检测核心抽为独立模块 `pitch.js`，新增回归测试 `test/pitch.test.js`（`node test/pitch.test.js`）。
+- 宽音域显示上限与检测上限对齐（MIDI 90 / 1500 Hz）。
+- 更新 Service Worker 缓存版本至 `vocal-studio-v7`。
+- 版本号更新至 v3.3。
+
 ## 最近更新（v3.2）
 - 修复弱基频音色把泛音当基频导致的音高抽动：YIN 优先取第一个强周期谷（CMND < 0.05），跳过半周期/三分之一周期处的浅泛音谷。
 - 八度/泛音级跳变改为连续 3 帧确认，确认期间保持当前音高、轨迹不断开，不再丢帧。

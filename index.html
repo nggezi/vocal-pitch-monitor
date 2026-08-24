@@ -134,6 +134,15 @@
                 <button class="pill" data-range="soprano" role="radio" aria-checked="false">女高</button>
                 <button class="pill" data-range="wide" role="radio" aria-checked="false">宽</button>
               </div>
+              <div class="a4-group">
+                <span class="range-label">A4</span>
+                <select id="a4Select" class="a4-select" aria-label="选择 A4 标准音频率">
+                  <option value="440">440 Hz</option>
+                  <option value="441">441 Hz</option>
+                  <option value="442">442 Hz</option>
+                  <option value="443">443 Hz</option>
+                </select>
+              </div>
             </div>
 
             <div class="canvas-shell">
@@ -246,12 +255,13 @@
 
       <footer class="foot">
         <span>nggezi</span>
-        <span class="ver">v3.2</span>
+        <span class="ver">v3.3</span>
         <a href="https://github.com/nggezi" target="_blank" rel="noopener">GitHub</a>
       </footer>
     </div>
   </div>
 
+  <script src="pitch.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

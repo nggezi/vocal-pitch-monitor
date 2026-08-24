@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════
-   VOCAL STUDIO — Engine v3.2
+   VOCAL STUDIO — Engine v3.3
    ═══════════════════════════════════════════ */
 
 const $ = (s) => document.querySelector(s);
@@ -28,20 +28,19 @@ const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
 const RANGES = {
   bass: { min: 36, max: 67 }, tenor: { min: 43, max: 76 },
   alto: { min: 48, max: 81 }, soprano: { min: 55, max: 88 },
-  wide: { min: 33, max: 93 },
+  wide: { min: 33, max: 90 }, // max=90（约 1500 Hz），与检测上限 PITCH_MAX 对齐
 };
 const SMOOTH = 0.15;        // 稳态平滑：偏差小时平滑显示
 const FAST_SMOOTH = 0.55;   // 转音快攻：检测到明显跳变时快速收敛
-const YIN_THRESHOLD = 0.15; // YIN 周期稳定性阈值（CMND），越低要求越严格
-const YIN_STRONG_THRESHOLD = 0.05; // 强周期阈值：优先取第一个足够深的谷，跳过弱泛音谷
 const VOLUME_THR = 0.0015;  // 有效声音的 RMS 音量阈值
+const LOW_CUT_HZ = 60;      // 麦克风输入低切频率，滤除电源哼声与低频隆隆声
+const DETECT_FPS = 30;      // 检测循环帧率上限
 const HOLD_MS = 600;        // 短暂无音时保持上一音高的时长
 const JUMP_CENTS = 150;     // 超过此偏差视为转音，触发快攻
 const OCTAVE_CENTS = 900;   // 超过此偏差疑似八度/泛音跳变
 const OCTAVE_CONFIRM_FRAMES = 3; // 八度/泛音跳变需连续确认的帧数，防止抽动
 const MEDIAN_WINDOW = 3;    // 中值滤波窗口，降低单次检测抖动
 const ROLL_WINDOW = 14000;  // 钢琴窗显示的时间窗口，单位毫秒
-const PITCH_MIN = 55, PITCH_MAX = 1500; // 人声检测频率范围（Hz）
 
 /* ─── State ─── */
 let audioCtx, analyser, mic, stream, buffer;
@@ -55,11 +54,12 @@ let freqBuffer = [];
 let lastLayout = { kbW: 72, h: 430 };
 let bgCache = null, bgCacheKey = "";
 let isListening = false;
-let yinBuf = null;
 let pendingJumpFreq = null, pendingJumpCount = 0;
 let colorCache = null;
 let lastRollTime = 0;
 let lastStatus = { msg: "", err: false };
+let lastDetectTime = 0;
+let a4 = parseFloat(localStorage.getItem("vs_a4")) || 440;
 
 /* ─── Vocal Range Stats ─── */
 let statHighMidi = -Infinity, statLowMidi = Infinity;
@@ -102,72 +102,25 @@ const savedTheme = localStorage.getItem("vs_theme");
 if (savedTheme) applyTheme(savedTheme);
 
 /* ═══════════════════════════════════════════
-   YIN PITCH DETECTION (Optimized)
+   A4 REFERENCE TUNING
    ═══════════════════════════════════════════ */
-
-/**
- * YIN 音高检测：差分函数 + CMND + 阈值选谷 + 抛物线插值。
- * 只搜索人声频率范围（PITCH_MIN–PITCH_MAX）对应的 tau，并复用缓冲区，
- * 计算量远小于全范围 O(n²) 版本。
- */
-function yin(samples, sr) {
-  const half = samples.length >> 1;
-  if (!yinBuf || yinBuf.length !== half) yinBuf = new Float32Array(half);
-  const buf = yinBuf;
-  let energy = 0;
-  for (let i = 0; i < samples.length; i++) energy += samples[i] * samples[i];
-  if (energy < 1e-8) return null; // 静音直接返回
-  const minTau = Math.max(2, Math.floor(sr / PITCH_MAX));
-  const maxTau = Math.min(half - 1, Math.ceil(sr / PITCH_MIN));
-  for (let t = minTau; t < maxTau; t++) {
-    let s = 0;
-    for (let i = 0; i < half - t; i++) { const d = samples[i] - samples[i + t]; s += d * d; }
-    buf[t] = s;
-  }
-  // 预累计小 tau 的原始差分，避免 CMND 首个谷被自归一化放大导致高频八度误检
-  let warmSum = 0;
-  for (let t = 2; t < minTau; t++) {
-    let s = 0;
-    for (let i = 0; i < half - t; i++) { const d = samples[i] - samples[i + t]; s += d * d; }
-    warmSum += s;
-  }
-  buf[minTau - 1] = warmSum;
-  let sum = 0, minVal = Infinity, minTauFound = -1;
-  for (let t = minTau - 1; t < maxTau; t++) {
-    sum += buf[t];
-    // 周期整数倍处差分值可能下溢为 0，避免 NaN 丢谷
-    buf[t] = sum > 1e-12 ? buf[t] * t / sum : 0;
-    if (t >= minTau && buf[t] < minVal) { minVal = buf[t]; minTauFound = t; }
-  }
-  if (minTauFound === -1 || minVal > YIN_THRESHOLD) return null;
-  // 泛音纠偏：先找第一个足够深的周期谷（<0.05）。
-  // 弱基频信号在半周期/1/3 周期处通常只有 0.06~0.15 的浅谷，
-  // 真正的基频谷深得多，跳过浅谷即可避免把泛音当基频。
-  let tau = -1;
-  for (let t = minTau; t < maxTau - 1; t++) {
-    if (buf[t] < YIN_STRONG_THRESHOLD) {
-      while (t + 1 < maxTau && buf[t + 1] < buf[t]) t++;
-      tau = t;
-      break;
-    }
-  }
-  if (tau === -1) {
-    // 没有足够深的谷时退回常规阈值，取第一个低于 0.15 的谷
-    for (let t = minTau; t < maxTau - 1; t++) {
-      if (buf[t] < YIN_THRESHOLD) {
-        while (t + 1 < maxTau && buf[t + 1] < buf[t]) t++;
-        tau = t;
-        break;
-      }
-    }
-    if (tau === -1) tau = minTauFound;
-  }
-  const s0 = buf[tau - 1] ?? buf[tau], s1 = buf[tau], s2 = buf[tau + 1] ?? s1;
-  if (s1 < 1e-6) return { freq: sr / tau, confidence: minVal }; // 完美周期，不插值
-  const d = s0 - 2 * s1 + s2;
-  const shift = d === 0 ? 0 : clamp((s0 - s2) / (2 * d), -0.5, 0.5);
-  return { freq: sr / (tau + (isNaN(shift) ? 0 : shift)), confidence: minVal };
+const a4Select = $("#a4Select");
+if (a4Select) {
+  a4Select.value = String(a4);
+  a4Select.addEventListener("change", () => {
+    a4 = parseFloat(a4Select.value) || 440;
+    localStorage.setItem("vs_a4", String(a4));
+    clearPitchRoll(); // 旧轨迹基于旧 A4 绘制，清空避免混用
+  });
 }
+
+/* ═══════════════════════════════════════════
+   YIN PITCH DETECTION
+   检测核心位于独立模块 pitch.js（全局 PitchCore），
+   便于浏览器加载与 Node 回归测试。
+   ═══════════════════════════════════════════ */
+const PitchCore = globalThis.PitchCore;
+const { yin, PITCH_MIN, PITCH_MAX } = PitchCore;
 
 /* ═══════════════════════════════════════════
    CORE LOOP
@@ -212,7 +165,13 @@ async function start() {
     analyser = audioCtx.createAnalyser();
     analyser.fftSize = 4096;
     mic = audioCtx.createMediaStreamSource(stream);
-    mic.connect(analyser);
+    // 低切滤波：滤除 50/60Hz 电源哼声和低频隆隆声，减少 YIN 误判
+    const lowCut = audioCtx.createBiquadFilter();
+    lowCut.type = "highpass";
+    lowCut.frequency.value = LOW_CUT_HZ;
+    lowCut.Q.value = 0.707; // Butterworth 响应
+    mic.connect(lowCut);
+    lowCut.connect(analyser);
     buffer = new Float32Array(analyser.fftSize);
     
     isListening = true;
@@ -250,9 +209,17 @@ function stop() {
   setStatus("已停止。", false);
 }
 
-function detect() {
+function detect(ts) {
   if (!isListening) return;
-  
+
+  const now = ts || performance.now();
+  // 检测循环限频到 ~30fps：人声变化远低于该频率，CPU 减半
+  if (now - lastDetectTime < 1000 / DETECT_FPS) {
+    animId = requestAnimationFrame(detect);
+    return;
+  }
+  lastDetectTime = now;
+
   analyser.getFloatTimeDomainData(buffer);
   const rms = getRms(buffer);
   const volInt = Math.round(rms * 1000);
@@ -260,9 +227,16 @@ function detect() {
 
   // Volume bar
   const volPct = Math.min(100, Math.round((rms / 0.1) * 100));
-  volumeBar.style.width = volPct + "%";
+  const volStyle = volPct + "%";
+  if (volumeBar.style.width !== volStyle) volumeBar.style.width = volStyle;
 
-  const now = performance.now();
+  // 削波检测：输入过大会导致削顶失真，YIN 结果不可靠
+  let clipCount = 0;
+  for (let i = 0; i < buffer.length; i++) {
+    if (Math.abs(buffer[i]) > 0.98) clipCount++;
+  }
+  const clipBad = clipCount / buffer.length > 0.003;
+
   // YIN 的 CMND 自带幅度归一化，无需额外峰值归一化；
   // confidence 表示周期匹配程度，可滤掉没有稳定周期的噪声。
   const raw = yin(buffer, audioCtx.sampleRate);
@@ -318,7 +292,7 @@ function detect() {
     recordPoint(smoothedFreq, rms);
 
     // Track vocal range stats
-    const noteMidi = Math.round(69 + 12 * Math.log2(smoothedFreq / 440));
+    const noteMidi = Math.round(69 + 12 * Math.log2(smoothedFreq / a4));
     if (noteMidi > statHighMidi) statHighMidi = noteMidi;
     if (noteMidi < statLowMidi) statLowMidi = noteMidi;
     statSumFreq += smoothedFreq;
@@ -330,7 +304,6 @@ function detect() {
     centsText.textContent = fmtCents(Math.round(smoothedCents));
     stability.textContent = fmtStability(pitchHistory);
     needle.style.left = (50 + clamp(smoothedCents, -50, 50)) + "%";
-    setStatus("正在监听。", false);
   } else if (smoothedFreq !== null && now - lastPitchTime < HOLD_MS) {
     recordPoint(smoothedFreq, rms);
     // Reset buffer when we lose voice but are holding the last pitch
@@ -344,6 +317,11 @@ function detect() {
     freqBuffer = []; // reset buffer when we lose voice
     pendingJumpFreq = null;
     pendingJumpCount = 0;
+  }
+  if (clipBad) {
+    setStatus("输入过大，请远离麦克风。", false);
+  } else if (hasVoice) {
+    setStatus("正在监听。", false);
   }
   animId = requestAnimationFrame(detect);
 }
@@ -578,8 +556,8 @@ function playRefNote(midi) {
    HELPERS
    ═══════════════════════════════════════════ */
 function getRms(s) { let s2 = 0; for (const v of s) s2 += v * v; return Math.sqrt(s2 / s.length); }
-function freqToNote(f) { const m = Math.round(69 + 12 * Math.log2(f / 440)); return { midi: m, name: NOTE_NAMES[((m % 12) + 12) % 12] + ((m / 12 | 0) - 1) }; }
-function noteToFreq(m) { return 440 * 2 ** ((m - 69) / 12); }
+function freqToNote(f) { const m = Math.round(69 + 12 * Math.log2(f / a4)); return { midi: m, name: NOTE_NAMES[((m % 12) + 12) % 12] + ((m / 12 | 0) - 1) }; }
+function noteToFreq(m) { return a4 * 2 ** ((m - 69) / 12); }
 function fmtCents(c) { return Math.abs(c) <= 5 ? "非常准" : (c > 0 ? "偏高 " + c : "偏低 " + Math.abs(c)); }
 function fmtStability(v) {
   if (v.length < 6) return "采样中";
@@ -607,7 +585,7 @@ function showNoPitch(msg) {
   setStatus(msg, false);
 }
 function resetUI() { noteName.textContent = "--"; frequencyValue.textContent = "--"; centsText.textContent = "--"; targetFrequency.textContent = "-- Hz"; stability.textContent = "--"; volume.textContent = "--"; volumeBar.style.width = "0%"; needle.style.left = "50%"; smoothedFreq = null; smoothedCents = null; statHighMidi = -Infinity; statLowMidi = Infinity; statSumFreq = 0; statCount = 0; updateStats(); }
-function recordPoint(f, rms) { timeline.push({ midi: 69 + 12 * Math.log2(f / 440), frequency: f, rms, time: performance.now() }); trimTimeline(); }
+function recordPoint(f, rms) { timeline.push({ midi: 69 + 12 * Math.log2(f / a4), frequency: f, rms, time: performance.now() }); trimTimeline(); }
 
 /**
  * Insertion sort for small arrays (more efficient than Array.sort for n < 10)
@@ -643,7 +621,7 @@ function updateStats() {
   const highName = noteNameStr(statHighMidi);
   const lowName = noteNameStr(statLowMidi);
   const avgFreq = statSumFreq / statCount;
-  const avgMidi = Math.round(69 + 12 * Math.log2(avgFreq / 440));
+  const avgMidi = Math.round(69 + 12 * Math.log2(avgFreq / a4));
   const avgName = noteNameStr(avgMidi);
   const spanSemitones = statHighMidi - statLowMidi;
   const spanOctaves = (spanSemitones / 12).toFixed(1);
@@ -738,6 +716,12 @@ window.addEventListener("resize", () => {
 });
 
 pitchRoll.addEventListener("pointerdown", playKey);
+// 从后台切回时恢复 AudioContext（Chrome 会暂停后台音频上下文）
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return;
+  if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+  if (refAudioCtx && refAudioCtx.state === "suspended") refAudioCtx.resume();
+});
 $$(".pill").forEach(b => b.addEventListener("click", () => {
   const r = RANGES[b.dataset.range];
   if (!r) return;

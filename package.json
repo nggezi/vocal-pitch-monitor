@@ -1,0 +1,9 @@
+{
+  "name": "vocal-pitch-monitor",
+  "version": "3.3.0",
+  "private": true,
+  "description": "Vocal Studio - 实时练唱音高监测",
+  "scripts": {
+    "test": "node test/pitch.test.js"
+  }
+}

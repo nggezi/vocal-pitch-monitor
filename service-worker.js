@@ -1,9 +1,10 @@
-const CACHE = "vocal-studio-v6";
+const CACHE = "vocal-studio-v7";
 const ASSETS = [
   "./",
   "./index.html",
   "./style.css",
   "./app.js",
+  "./pitch.js",
   "./manifest.json",
   "./icon-192.svg",
   "./icon-512.svg"

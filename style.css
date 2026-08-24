@@ -333,6 +333,20 @@ body {
 .range-label { font-size: 0.8rem; color: var(--text-2); font-weight: 600; }
 .range-group { display: flex; gap: 8px; flex-wrap: wrap; }
 
+.a4-group {
+  display: flex; align-items: center; gap: 8px;
+  margin-left: auto;
+}
+.a4-select {
+  padding: 8px 12px; border-radius: var(--r-pill);
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.03); color: var(--text-2);
+  font-family: var(--font); font-size: 0.85rem; font-weight: 600;
+  cursor: pointer; transition: all 0.3s var(--spring);
+}
+.a4-select:hover { background: rgba(255,255,255,0.05); color: var(--text); border-color: var(--border-focus); }
+.a4-select option { background: var(--core); color: var(--text); }
+
 .pill {
   padding: 8px 18px; border-radius: var(--r-pill);
   border: 1px solid var(--border);
