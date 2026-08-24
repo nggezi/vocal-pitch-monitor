@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════
-   VOCAL STUDIO — Engine v3.3
+   VOCAL STUDIO — Engine v3.4
    ═══════════════════════════════════════════ */
 
 const $ = (s) => document.querySelector(s);
@@ -390,17 +390,6 @@ function buildBgCache(W, H, kbW, rowH) {
   }
   ocCtx.fillStyle = c.grid;
   ocCtx.fillRect(kbW - 6, 0, 1, H);
-  for (let s = 0; s <= ROLL_WINDOW / 1000; s += 2) {
-    const x = kbW + (W - kbW) - (s * 1000 / ROLL_WINDOW) * (W - kbW);
-    ocCtx.strokeStyle = c.grid; ocCtx.lineWidth = 0.7;
-    ocCtx.beginPath(); ocCtx.moveTo(x, 0); ocCtx.lineTo(x, H); ocCtx.stroke();
-  }
-  ocCtx.fillStyle = c.text;
-  ocCtx.font = `600 ${W < 500 ? 9 : 10}px system-ui`;
-  ocCtx.textAlign = "right"; ocCtx.textBaseline = "top";
-  ocCtx.fillText("now", kbW + (W - kbW) - 30, 8);
-  ocCtx.textAlign = "left";
-  ocCtx.fillText("-" + (ROLL_WINDOW / 1000) + "s", kbW + 8, 8);
 
   return oc;
 }
@@ -419,6 +408,26 @@ function drawRoll() {
   if (!bgCache || bgCacheKey !== key) { bgCache = buildBgCache(W, H, kbW, rowH); bgCacheKey = key; }
   rollCtx.clearRect(0, 0, W, H);
   rollCtx.drawImage(bgCache, 0, 0, W, H);
+
+  // 动态时间网格：与轨迹使用同一时间基准，避免静态网格随时间错位
+  rollCtx.font = `600 ${W < 500 ? 9 : 10}px system-ui`;
+  for (let s = 0; s <= ROLL_WINDOW / 1000; s += 2) {
+    const x = ptX(now - s * 1000, pL, pW, now);
+    rollCtx.strokeStyle = c.grid;
+    rollCtx.lineWidth = 0.7;
+    rollCtx.beginPath(); rollCtx.moveTo(x, 0); rollCtx.lineTo(x, H); rollCtx.stroke();
+  }
+  // 当前时刻播放指针：始终钉在时间轴最右端（now 位置）
+  const nowX = ptX(now, pL, pW, now) - 1; // 内缩 1px，避免线画在画布外
+  rollCtx.strokeStyle = c.accent + "66";
+  rollCtx.lineWidth = 1.5;
+  rollCtx.beginPath(); rollCtx.moveTo(nowX, 0); rollCtx.lineTo(nowX, H); rollCtx.stroke();
+  // 时间标签
+  rollCtx.fillStyle = c.text;
+  rollCtx.textAlign = "right"; rollCtx.textBaseline = "top";
+  rollCtx.fillText("now", pL + pW - 4, 8);
+  rollCtx.textAlign = "left";
+  rollCtx.fillText("-" + (ROLL_WINDOW / 1000) + "s", pL + 4, 8);
 
   const pts = timeline.filter(p => p.midi >= minMidi && p.midi <= maxMidi);
   if (!pts.length) {
