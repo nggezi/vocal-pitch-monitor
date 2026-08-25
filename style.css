@@ -739,6 +739,11 @@ button:focus-visible,
   font-variant-numeric: tabular-nums;
 }
 
+.window-row {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 20px; flex-wrap: wrap;
+}
+
 .cta.active {
   background: rgba(251,113,133,0.18);
   color: #fda4af;
@@ -781,11 +786,30 @@ button:focus-visible,
 }
 .history-item .history-date { color: var(--text); font-weight: 700; min-width: 92px; }
 .history-empty { color: var(--text-2); font-size: 0.85rem; margin: 0 0 18px; }
+.history-trend {
+  margin-bottom: 18px; padding: 10px 14px;
+  border-radius: var(--r-md);
+  background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.04);
+}
+.history-trend svg { width: 100%; height: 90px; display: block; }
+.history-trend-hint { color: var(--text-2); font-size: 0.8rem; margin: 0; }
+
+/* ─── Session Summary ─── */
+.summary-card { max-width: 420px; }
+.summary-body { margin: 0 0 22px; display: flex; flex-direction: column; gap: 10px; }
+.summary-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 14px; border-radius: var(--r-sm);
+  background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.04);
+}
+.summary-label { color: var(--text-2); font-size: 0.8rem; font-weight: 600; }
+.summary-value { color: var(--text); font-size: 0.88rem; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
 
 @media (max-width: 720px) {
   .roll-actions { justify-content: flex-start; }
   .target-input { min-width: 100%; }
   .history-core { padding: 22px; }
   .history-item { gap: 10px; }
+  .window-row { margin-bottom: 14px; }
 }
 

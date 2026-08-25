@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════
-   VOCAL STUDIO — Engine v4.0
+   VOCAL STUDIO — Engine v4.1
    ═══════════════════════════════════════════ */
 
 const $ = (s) => document.querySelector(s);
@@ -27,12 +27,18 @@ const targetInput = $("#targetInput");
 const targetDur = $("#targetDur");
 const targetToggle = $("#targetToggle");
 const targetScore = $("#targetScore");
+const targetPreset = $("#targetPreset");
+const targetRoot = $("#targetRoot");
+const targetListen = $("#targetListen");
 const micSelect = $("#micSelect");
 const statAccuracy = $("#statAccuracy");
 const statVibrato = $("#statVibrato");
 const statVibratoSub = $("#statVibratoSub");
 const guideOverlay = $("#guideOverlay");
 const guideClose = $("#guideClose");
+const summaryOverlay = $("#summaryOverlay");
+const summaryBody = $("#summaryBody");
+const summaryClose = $("#summaryClose");
 const rollCtx = pitchRoll.getContext("2d");
 
 /* ─── Constants ─── */
@@ -52,7 +58,6 @@ const JUMP_CENTS = 150;     // 超过此偏差视为转音，触发快攻
 const OCTAVE_CENTS = 900;   // 超过此偏差疑似八度/泛音跳变
 const OCTAVE_CONFIRM_FRAMES = 3; // 八度/泛音跳变需连续确认的帧数，防止抽动
 const MEDIAN_WINDOW = 3;    // 中值滤波窗口，降低单次检测抖动
-const ROLL_WINDOW = 14000;  // 钢琴窗显示的时间窗口，单位毫秒
 const HISTORY_MAX = 20;     // 练习历史最多保存条数
 const VIBRATO_WINDOW_MS = 3000; // 颤音分析时间窗口
 
@@ -64,7 +69,9 @@ let mediaRecorder = null, recordChunks = [], isRecording = false;
 let sessionStartTime = 0, recordingUrl = null, recordingPoints = null;
 let replayAudio = null, isReplaying = false;
 let targetNotes = [], targetMode = false, targetStartTime = 0, targetIndex = 0, targetScores = [];
+let previewTimer = null, isPreviewing = false;
 let micDevices = [], selectedMicId = localStorage.getItem("vs_mic_id") || "";
+let rollWindow = 14000;     // 钢琴窗显示的时间窗口（可切换 5s/14s/30s）
 let smoothedFreq = null, smoothedCents = null, lastPitchTime = 0;
 let minMidi = RANGES.tenor.min, maxMidi = RANGES.tenor.max;
 const pitchHistory = [];
@@ -219,6 +226,7 @@ function stop() {
   if (!isListening) return;
   
   exitReplay();
+  stopPreview();
   stopRecording();
   cancelAnimationFrame(animId);
   animId = undefined;
@@ -238,7 +246,10 @@ function stop() {
   startButton.disabled = false;
   stopButton.disabled = true;
   recordButton.disabled = true;
-  if (statCount > 0) saveHistory();
+  if (statCount > 0) {
+    saveHistory();
+    showSessionSummary();
+  }
   resetUI();
   setStatus("已停止。", false);
 }
@@ -326,7 +337,7 @@ function detect(ts) {
     recentCents.push(cents);
     if (recentCents.length > 300) recentCents.shift();
     if (Math.abs(cents) <= 10) statAccCount++;
-    recordPoint(smoothedFreq, rms);
+    recordPoint(smoothedFreq, rms, cents);
     if (targetMode && targetNotes.length) updateTargetEval(smoothedFreq, now);
 
     // Track vocal range stats
@@ -344,7 +355,7 @@ function detect(ts) {
     needle.style.left = (50 + clamp(smoothedCents, -50, 50)) + "%";
     updateAccuracyAndVibrato(now);
   } else if (smoothedFreq !== null && now - lastPitchTime < HOLD_MS) {
-    recordPoint(smoothedFreq, rms);
+    recordPoint(smoothedFreq, rms, smoothedCents);
     // Reset buffer when we lose voice but are holding the last pitch
     freqBuffer = [];
     pendingJumpFreq = null;
@@ -444,7 +455,7 @@ function drawRoll(nowArg) {
   if (isReplaying && recordingPoints) {
     const curMs = replayAudio ? replayAudio.currentTime * 1000 : 0;
     now = curMs;
-    pts = recordingPoints.filter(p => p.rel >= curMs - ROLL_WINDOW && p.rel <= curMs && p.midi >= minMidi && p.midi <= maxMidi);
+    pts = recordingPoints.filter(p => p.rel >= curMs - rollWindow && p.rel <= curMs && p.midi >= minMidi && p.midi <= maxMidi);
     replayLabel = true;
   } else {
     now = nowArg || performance.now();
@@ -460,7 +471,7 @@ function drawRoll(nowArg) {
 
   // 动态时间网格：与轨迹使用同一时间基准，避免静态网格随时间错位
   rollCtx.font = `600 ${W < 500 ? 9 : 10}px system-ui`;
-  for (let s = 0; s <= ROLL_WINDOW / 1000; s += 2) {
+  for (let s = 0; s <= rollWindow / 1000; s += 2) {
     const x = ptX(now - s * 1000, pL, pW, now);
     rollCtx.strokeStyle = c.grid;
     rollCtx.lineWidth = 0.7;
@@ -476,7 +487,7 @@ function drawRoll(nowArg) {
   rollCtx.textAlign = "right"; rollCtx.textBaseline = "top";
   rollCtx.fillText(replayLabel ? "REPLAY" : "now", pL + pW - 4, 8);
   rollCtx.textAlign = "left";
-  rollCtx.fillText("-" + (ROLL_WINDOW / 1000) + "s", pL + 4, 8);
+  rollCtx.fillText("-" + (rollWindow / 1000) + "s", pL + 4, 8);
 
   // 跟唱目标线：橙色阶梯，当前音符高亮
   if (targetMode && targetNotes.length && !isReplaying) {
@@ -486,8 +497,8 @@ function drawRoll(nowArg) {
     rollCtx.font = `700 ${W < 500 ? 9 : 10}px system-ui`;
     for (let i = 0; i < targetNotes.length; i++) {
       const n = targetNotes[i];
-      if (n.start + n.durMs < tNow - ROLL_WINDOW) continue;
-      const x1 = ptX(Math.max(n.start, tNow - ROLL_WINDOW), pL, pW, tNow);
+      if (n.start + n.durMs < tNow - rollWindow) continue;
+      const x1 = ptX(Math.max(n.start, tNow - rollWindow), pL, pW, tNow);
       const x2 = ptX(Math.min(n.start + n.durMs, tNow), pL, pW, tNow);
       if (x2 <= x1) continue;
       const y = midiCY(n.midi, H);
@@ -497,7 +508,7 @@ function drawRoll(nowArg) {
       rollCtx.moveTo(x1, y);
       rollCtx.lineTo(x2, y);
       rollCtx.stroke();
-      if (active || n.start > tNow - ROLL_WINDOW) {
+      if (active || n.start > tNow - rollWindow) {
         rollCtx.fillStyle = "#f59e0b";
         rollCtx.textAlign = "left"; rollCtx.textBaseline = "bottom";
         rollCtx.fillText(noteNameStr(n.midi), x1 + 3, y - 3);
@@ -546,9 +557,13 @@ function drawRoll(nowArg) {
 }
 
 function drawBezierPath(pts, pL, pW, H, now, color, lineWidth) {
-  rollCtx.strokeStyle = color;
-  rollCtx.lineWidth = lineWidth;
-  rollCtx.beginPath();
+  // 主轨迹按逐点 cents 偏差着色：绿（≤10¢）/ 橙（≤25¢）/ 红（超出）
+  const colorByCents = (avg) => {
+    if (avg === null || avg === undefined) return color;
+    if (avg <= 10) return "#34d399";
+    if (avg <= 25) return "#f59e0b";
+    return "#f87171";
+  };
   let segments = [];
   let seg = [];
   for (const p of pts) {
@@ -561,12 +576,22 @@ function drawBezierPath(pts, pL, pW, H, now, color, lineWidth) {
   if (seg.length) segments.push(seg);
 
   for (const s of segments) {
+    rollCtx.strokeStyle = color;
+    rollCtx.lineWidth = lineWidth;
+    rollCtx.beginPath();
     if (s.length < 2) {
       const x = ptX(s[0].time, pL, pW, now);
       const y = midiCY(s[0].midi, H);
       rollCtx.moveTo(x, y);
       rollCtx.lineTo(x + 0.5, y);
+      rollCtx.stroke();
       continue;
+    }
+    // 计算该段平均偏差用于着色（仅主轨迹细线层着色，光晕层保持统一色）
+    if (lineWidth <= 2 && s[0].cents !== undefined) {
+      let sum = 0, n = 0;
+      for (const p of s) { if (p.cents !== null && p.cents !== undefined) { sum += Math.abs(p.cents); n++; } }
+      if (n) rollCtx.strokeStyle = colorByCents(sum / n);
     }
     const x0 = ptX(s[0].time, pL, pW, now);
     const y0 = midiCY(s[0].midi, H);
@@ -581,11 +606,11 @@ function drawBezierPath(pts, pL, pW, H, now, color, lineWidth) {
     }
     const last = s[s.length - 1];
     rollCtx.lineTo(ptX(last.time, pL, pW, now), midiCY(last.midi, H));
+    rollCtx.stroke();
   }
-  rollCtx.stroke();
 }
 
-function ptX(t, pL, pW, now) { return pL + ((t - (now - ROLL_WINDOW)) / ROLL_WINDOW) * pW; }
+function ptX(t, pL, pW, now) { return pL + ((t - (now - rollWindow)) / rollWindow) * pW; }
 function midiY(m, H) { return ((maxMidi - m) / (maxMidi - minMidi + 1)) * H; }
 function midiCY(m, H) { return ((maxMidi - m + 0.5) / (maxMidi - minMidi + 1)) * H; }
 function noteNameStr(m) { return NOTE_NAMES[((m % 12) + 12) % 12] + ((m / 12 | 0) - 1); }
@@ -681,7 +706,7 @@ function showNoPitch(msg) {
   setStatus(msg, false);
 }
 function resetUI() { noteName.textContent = "--"; frequencyValue.textContent = "--"; centsText.textContent = "--"; targetFrequency.textContent = "-- Hz"; stability.textContent = "--"; volume.textContent = "--"; volumeBar.style.width = "0%"; needle.style.left = "50%"; smoothedFreq = null; smoothedCents = null; statHighMidi = -Infinity; statLowMidi = Infinity; statSumFreq = 0; statCount = 0; statAccCount = 0; statAccuracy.textContent = "--"; statVibrato.textContent = "--"; statVibratoSub.textContent = "--"; lastVibratoText = ""; updateStats(); }
-function recordPoint(f, rms) { timeline.push({ midi: 69 + 12 * Math.log2(f / a4), frequency: f, rms, time: performance.now(), rel: performance.now() - sessionStartTime }); trimTimeline(); }
+function recordPoint(f, rms, cents) { timeline.push({ midi: 69 + 12 * Math.log2(f / a4), frequency: f, rms, cents: cents ?? null, time: performance.now(), rel: performance.now() - sessionStartTime }); trimTimeline(); }
 
 /**
  * Insertion sort for small arrays (more efficient than Array.sort for n < 10)
@@ -732,7 +757,7 @@ function updateStats() {
   spanNote.textContent = "约 " + spanOctaves + " 个八度";
 }
 function clearPitchRoll() { timeline.length = 0; bgCache = null; drawRoll(); }
-function trimTimeline() { const now = performance.now(); while (timeline.length && timeline[0].time < now - ROLL_WINDOW) timeline.shift(); }
+function trimTimeline() { const now = performance.now(); while (timeline.length && timeline[0].time < now - rollWindow) timeline.shift(); }
 
 /* ═══════════════════════════════════════════
    FOLLOW-ALONG TARGET MELODY
@@ -751,8 +776,54 @@ function parseNotes(str) {
   }
   return out;
 }
+function applyPreset() {
+  if (!targetPreset || !targetPreset.value) return;
+  const rootName = targetRoot ? targetRoot.value : "C";
+  const rootNi = NOTE_MAP[rootName];
+  if (rootNi === undefined) return;
+  const octave = 4; // 从第 4 个八度起始，可覆盖多数音域
+  const root = (octave + 1) * 12 + rootNi;
+  const PRESETS = {
+    major: [0, 2, 4, 5, 7, 9, 11, 12],
+    minor: [0, 2, 3, 5, 7, 8, 10, 12],
+    pentatonic: [0, 2, 4, 7, 9, 12],
+    arpeggio: [0, 4, 7, 12, 16, 19, 24],
+    thirds: [0, 4, 7, 12, 9, 12, 16],
+    octave: [0, 12, 0, -12, 0],
+  };
+  const steps = PRESETS[targetPreset.value];
+  if (!steps) return;
+  const notes = steps.map(s => root + s).map(noteNameStr);
+  targetInput.value = notes.join(" ");
+  setStatus(`已生成${targetPreset.options[targetPreset.selectedIndex].text}：${notes.join(" ")}`, false);
+}
+function previewTarget() {
+  if (isPreviewing) { stopPreview(); return; }
+  const notes = parseNotes(targetInput.value);
+  if (!notes.length) { setStatus("请先输入有效音高序列。", true); return; }
+  const gapMs = parseInt(targetDur.value, 10) || 2000;
+  isPreviewing = true;
+  targetListen.textContent = "停止试听";
+  targetListen.classList.add("active");
+  let i = 0;
+  const playNext = () => {
+    if (!isPreviewing) return;
+    if (i >= notes.length) { stopPreview(); return; }
+    playRefNote(notes[i]);
+    i++;
+    previewTimer = setTimeout(playNext, gapMs);
+  };
+  playNext();
+}
+function stopPreview() {
+  isPreviewing = false;
+  clearTimeout(previewTimer);
+  previewTimer = null;
+  if (targetListen) { targetListen.textContent = "试听"; targetListen.classList.remove("active"); }
+}
 function toggleTargetMode() {
   if (targetMode) { exitTargetMode(); return; }
+  stopPreview();
   const notes = parseNotes(targetInput.value);
   if (!notes.length) {
     setStatus("请输入有效音高，如 C4 E4 G4 C5。", true);
@@ -814,6 +885,30 @@ function finishTargetMode() {
   targetToggle.textContent = "开始跟唱";
   targetToggle.classList.remove("active");
   bgCache = null;
+}
+function targetTotalScore() {
+  const done = targetScores.filter(s => s !== undefined);
+  if (!done.length) return null;
+  return Math.round(done.reduce((a, b) => a + b, 0) / done.length);
+}
+function showSessionSummary() {
+  if (!summaryOverlay || !summaryBody || !statCount) return;
+  const dur = Math.round((performance.now() - sessionStartTime) / 1000);
+  const durText = dur >= 60 ? `${(dur / 60).toFixed(1)} 分钟` : `${dur} 秒`;
+  const accPct = Math.round(statAccCount / statCount * 100);
+  const vibText = statVibrato.textContent !== "--" ? `${statVibrato.textContent}（${statVibratoSub.textContent}）` : "未检测到";
+  const score = targetTotalScore();
+  const rows = [
+    ["练习时长", durText],
+    ["音域", `${noteNameStr(statLowMidi)} – ${noteNameStr(statHighMidi)}（${statHighMidi - statLowMidi} 半音）`],
+    ["音准保持率", `${accPct}% 在 ±10¢ 内`],
+    ["颤音", vibText],
+  ];
+  if (score !== null) rows.push(["跟唱得分", `${score} / 100`]);
+  summaryBody.innerHTML = rows.map(([k, v]) =>
+    `<div class="summary-row"><span class="summary-label">${k}</span><strong class="summary-value">${v}</strong></div>`
+  ).join("");
+  summaryOverlay.classList.remove("hidden");
 }
 
 /* ═══════════════════════════════════════════
@@ -931,12 +1026,15 @@ function renderHistory() {
   let hist = [];
   try { hist = JSON.parse(localStorage.getItem("vs_history") || "[]"); } catch (e) {}
   const empty = $("#historyEmpty"), list = $("#historyList");
+  const trend = $("#historyTrend");
   if (!hist.length) {
     if (list) list.innerHTML = "";
     if (empty) empty.style.display = "block";
+    if (trend) trend.innerHTML = "";
     return;
   }
   if (empty) empty.style.display = "none";
+  if (trend) trend.innerHTML = renderTrendChart(hist);
   if (!list) return;
   list.innerHTML = hist.map(r => {
     const d = new Date(r.date);
@@ -945,6 +1043,26 @@ function renderHistory() {
     const span = Number.isFinite(r.high) ? `${noteNameStr(r.low)}–${noteNameStr(r.high)}` : "--";
     return `<div class="history-item"><span class="history-date">${dateStr}</span><span>${dur}</span><span>${span}</span><span>音准 ${r.accPct}%</span></div>`;
   }).join("");
+}
+function renderTrendChart(hist) {
+  const data = [...hist].reverse().map(r => r.accPct).filter(v => Number.isFinite(v));
+  if (data.length < 2) return '<p class="history-trend-hint">再完成几次练习，这里会显示音准趋势。</p>';
+  const W = 600, H = 90, pad = 8;
+  const maxV = 100, minV = 0;
+  const xStep = (W - pad * 2) / (data.length - 1);
+  const y = (v) => H - pad - (v - minV) / (maxV - minV) * (H - pad * 2);
+  const pts = data.map((v, i) => `${(pad + i * xStep).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  const lastX = pad + (data.length - 1) * xStep;
+  const lastY = y(data[data.length - 1]);
+  const grid = [0, 25, 50, 75, 100].map(v =>
+    `<line x1="${pad}" y1="${y(v)}" x2="${W - pad}" y2="${y(v)}" stroke="rgba(128,128,128,0.15)" stroke-width="1"/>` +
+    `<text x="${pad}" y="${y(v) - 2}" font-size="8" fill="rgba(128,128,128,0.6)">${v}%</text>`
+  ).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="音准保持率趋势">
+    ${grid}
+    <polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2" vector-effect="non-scaling-stroke"/>
+    <circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="3" fill="var(--accent)"/>
+  </svg>`;
 }
 function clearHistory() {
   localStorage.removeItem("vs_history");
@@ -1068,6 +1186,9 @@ if (exportJsonButton) exportJsonButton.addEventListener("click", () => exportTim
 if (recordButton) recordButton.addEventListener("click", () => { isRecording ? stopRecording() : startRecording(); });
 if (playbackButton) playbackButton.addEventListener("click", togglePlayback);
 if (targetToggle) targetToggle.addEventListener("click", toggleTargetMode);
+if (targetPreset) targetPreset.addEventListener("change", applyPreset);
+if (targetListen) targetListen.addEventListener("click", previewTarget);
+if (summaryClose) summaryClose.addEventListener("click", () => summaryOverlay.classList.add("hidden"));
 if (micSelect) {
   micSelect.addEventListener("change", () => {
     selectedMicId = micSelect.value || "";
@@ -1075,6 +1196,12 @@ if (micSelect) {
   });
 }
 if ($("#clearHistoryButton")) $("#clearHistoryButton").addEventListener("click", clearHistory);
+$$("#windowGroup .pill").forEach(b => b.addEventListener("click", () => {
+  rollWindow = parseInt(b.dataset.window, 10) || 14000;
+  $$("#windowGroup .pill").forEach(p => p.classList.toggle("active", p === b));
+  trimTimeline();
+  bgCache = null;
+}));
 
 // Debounced resize handler
 let resizeTimeout;
@@ -1115,6 +1242,7 @@ $$(".hero, .roll-section, .stats-section, .history-section, .tips-section, .shor
 /* ─── Cleanup on page unload ─── */
 window.addEventListener("beforeunload", () => {
   exitReplay();
+  stopPreview();
   stopRecording();
   if (isListening) {
     cancelAnimationFrame(animId);

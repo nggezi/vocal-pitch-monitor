@@ -38,6 +38,18 @@
     </div>
   </div>
 
+  <!-- Session Summary -->
+  <div id="summaryOverlay" class="guide-overlay" role="dialog" aria-label="会话总结">
+    <div class="guide-card summary-card">
+      <div class="guide-icon">📊</div>
+      <h2>本次练习总结</h2>
+      <div id="summaryBody" class="summary-body"></div>
+      <button id="summaryClose" class="cta" type="button">
+        <span>知道了</span>
+      </button>
+    </div>
+  </div>
+
   <button id="themeToggle" class="theme-btn" aria-label="切换日夜间主题">
     <span class="icon-sun" aria-hidden="true">☀</span>
     <span class="icon-moon" aria-hidden="true">☽</span>
@@ -157,14 +169,47 @@
 
             <div class="target-row">
               <span class="range-label">跟唱</span>
+              <select id="targetPreset" class="a4-select" aria-label="练习模板">
+                <option value="">练习模板</option>
+                <option value="major">大调音阶</option>
+                <option value="minor">自然小调音阶</option>
+                <option value="pentatonic">五声音阶</option>
+                <option value="arpeggio">三和弦琶音</option>
+                <option value="thirds">三度跳进</option>
+                <option value="octave">八度跳进</option>
+              </select>
+              <select id="targetRoot" class="a4-select" aria-label="根音">
+                <option value="C">C</option>
+                <option value="C#">C#</option>
+                <option value="D">D</option>
+                <option value="D#">D#</option>
+                <option value="E">E</option>
+                <option value="F">F</option>
+                <option value="F#">F#</option>
+                <option value="G">G</option>
+                <option value="G#">G#</option>
+                <option value="A">A</option>
+                <option value="A#">A#</option>
+                <option value="B">B</option>
+              </select>
               <input id="targetInput" class="target-input" placeholder="目标音高，如 C4 E4 G4 C5" aria-label="目标音高序列" />
               <select id="targetDur" class="a4-select" aria-label="每个音符时长">
                 <option value="1500">1.5s/音</option>
                 <option value="2000" selected>2s/音</option>
                 <option value="3000">3s/音</option>
               </select>
+              <button id="targetListen" class="cta cta-ghost cta-sm" aria-label="试听目标旋律">试听</button>
               <button id="targetToggle" class="cta cta-ghost cta-sm" aria-label="开始或停止跟唱">开始跟唱</button>
               <span id="targetScore" class="target-score" aria-live="polite"></span>
+            </div>
+
+            <div class="window-row">
+              <span class="range-label">时间窗</span>
+              <div class="range-group" id="windowGroup" role="radiogroup" aria-label="时间轴缩放">
+                <button class="pill" data-window="5000" role="radio" aria-checked="false">5s</button>
+                <button class="pill active" data-window="14000" role="radio" aria-checked="true">14s</button>
+                <button class="pill" data-window="30000" role="radio" aria-checked="false">30s</button>
+              </div>
             </div>
 
             <div class="canvas-shell">
@@ -231,6 +276,7 @@
               <span class="tag">PRACTICE HISTORY</span>
               <h2>练习历史</h2>
             </div>
+            <div id="historyTrend" class="history-trend" aria-label="音准趋势图"></div>
             <div id="historyList" class="history-list"></div>
             <p id="historyEmpty" class="history-empty">还没有练习记录，完成一次监听后自动保存。</p>
             <button id="clearHistoryButton" class="cta cta-ghost cta-sm" aria-label="清空练习历史">清空历史</button>
@@ -302,7 +348,7 @@
 
       <footer class="foot">
         <span>nggezi</span>
-        <span class="ver">v4.0</span>
+        <span class="ver">v4.1</span>
         <a href="https://github.com/nggezi" target="_blank" rel="noopener">GitHub</a>
       </footer>
     </div>
