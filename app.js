@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════
-   VOCAL STUDIO — Engine v3.4
+   VOCAL STUDIO — Engine v4.0
    ═══════════════════════════════════════════ */
 
 const $ = (s) => document.querySelector(s);
@@ -19,6 +19,18 @@ const volumeBar = $("#volumeBar");
 const needle = $("#needle");
 const pitchRoll = $("#pitchRoll");
 const clearRollButton = $("#clearRollButton");
+const exportCsvButton = $("#exportCsvButton");
+const exportJsonButton = $("#exportJsonButton");
+const recordButton = $("#recordButton");
+const playbackButton = $("#playbackButton");
+const targetInput = $("#targetInput");
+const targetDur = $("#targetDur");
+const targetToggle = $("#targetToggle");
+const targetScore = $("#targetScore");
+const micSelect = $("#micSelect");
+const statAccuracy = $("#statAccuracy");
+const statVibrato = $("#statVibrato");
+const statVibratoSub = $("#statVibratoSub");
 const guideOverlay = $("#guideOverlay");
 const guideClose = $("#guideClose");
 const rollCtx = pitchRoll.getContext("2d");
@@ -41,14 +53,22 @@ const OCTAVE_CENTS = 900;   // 超过此偏差疑似八度/泛音跳变
 const OCTAVE_CONFIRM_FRAMES = 3; // 八度/泛音跳变需连续确认的帧数，防止抽动
 const MEDIAN_WINDOW = 3;    // 中值滤波窗口，降低单次检测抖动
 const ROLL_WINDOW = 14000;  // 钢琴窗显示的时间窗口，单位毫秒
+const HISTORY_MAX = 20;     // 练习历史最多保存条数
+const VIBRATO_WINDOW_MS = 3000; // 颤音分析时间窗口
 
 /* ─── State ─── */
 let audioCtx, analyser, mic, stream, buffer;
 let refAudioCtx;
 let animId, rollAnimId;
+let mediaRecorder = null, recordChunks = [], isRecording = false;
+let sessionStartTime = 0, recordingUrl = null, recordingPoints = null;
+let replayAudio = null, isReplaying = false;
+let targetNotes = [], targetMode = false, targetStartTime = 0, targetIndex = 0, targetScores = [];
+let micDevices = [], selectedMicId = localStorage.getItem("vs_mic_id") || "";
 let smoothedFreq = null, smoothedCents = null, lastPitchTime = 0;
 let minMidi = RANGES.tenor.min, maxMidi = RANGES.tenor.max;
 const pitchHistory = [];
+const recentCents = [];
 const timeline = [];
 let freqBuffer = [];
 let lastLayout = { kbW: 72, h: 430 };
@@ -60,6 +80,8 @@ let lastRollTime = 0;
 let lastStatus = { msg: "", err: false };
 let lastDetectTime = 0;
 let a4 = parseFloat(localStorage.getItem("vs_a4")) || 440;
+let statAccCount = 0;
+let lastVibratoText = "";
 
 /* ─── Vocal Range Stats ─── */
 let statHighMidi = -Infinity, statLowMidi = Infinity;
@@ -139,8 +161,10 @@ async function start() {
   }
   
   try {
+    const audioConstraints = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+    if (selectedMicId) audioConstraints.deviceId = { exact: selectedMicId };
     stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+      audio: audioConstraints
     });
   } catch (e) {
     if (e.name === "NotAllowedError") {
@@ -173,11 +197,16 @@ async function start() {
     mic.connect(lowCut);
     lowCut.connect(analyser);
     buffer = new Float32Array(analyser.fftSize);
+    sessionStartTime = performance.now();
+    statAccCount = 0;
     
     isListening = true;
     startButton.disabled = true;
     startButton.classList.remove("loading");
     stopButton.disabled = false;
+    recordButton.disabled = false;
+    if (window.MediaRecorder) startRecording();
+    loadMicDevices(); // 授权后刷新设备标签
     setStatus("正在监听，请唱一个稳定的单音。", false);
     detect();
   } catch (e) {
@@ -189,9 +218,12 @@ async function start() {
 function stop() {
   if (!isListening) return;
   
+  exitReplay();
+  stopRecording();
   cancelAnimationFrame(animId);
   animId = undefined;
   pitchHistory.length = 0;
+  recentCents.length = 0;
   smoothedFreq = null;
   smoothedCents = null;
   freqBuffer = [];
@@ -205,6 +237,8 @@ function stop() {
   isListening = false;
   startButton.disabled = false;
   stopButton.disabled = true;
+  recordButton.disabled = true;
+  if (statCount > 0) saveHistory();
   resetUI();
   setStatus("已停止。", false);
 }
@@ -289,7 +323,11 @@ function detect(ts) {
     smoothedCents = cents;
     pitchHistory.push(cents);
     if (pitchHistory.length > 18) pitchHistory.shift();
+    recentCents.push(cents);
+    if (recentCents.length > 300) recentCents.shift();
+    if (Math.abs(cents) <= 10) statAccCount++;
     recordPoint(smoothedFreq, rms);
+    if (targetMode && targetNotes.length) updateTargetEval(smoothedFreq, now);
 
     // Track vocal range stats
     const noteMidi = Math.round(69 + 12 * Math.log2(smoothedFreq / a4));
@@ -302,8 +340,9 @@ function detect(ts) {
     frequencyValue.textContent = smoothedFreq.toFixed(1);
     targetFrequency.textContent = target.toFixed(1) + " Hz";
     centsText.textContent = fmtCents(Math.round(smoothedCents));
-    stability.textContent = fmtStability(pitchHistory);
+    stability.textContent = fmtStability(pitchHistory, recentCents);
     needle.style.left = (50 + clamp(smoothedCents, -50, 50)) + "%";
+    updateAccuracyAndVibrato(now);
   } else if (smoothedFreq !== null && now - lastPitchTime < HOLD_MS) {
     recordPoint(smoothedFreq, rms);
     // Reset buffer when we lose voice but are holding the last pitch
@@ -394,14 +433,24 @@ function buildBgCache(W, H, kbW, rowH) {
   return oc;
 }
 
-function drawRoll() {
+function drawRoll(nowArg) {
   const W = pitchRoll.clientWidth, H = pitchRoll.clientHeight;
-  const now = performance.now();
   const kbW = W < 500 ? 48 : 72;
   const pL = kbW, pW = W - pL;
   const rowH = H / (maxMidi - minMidi + 1);
   lastLayout = { kbW, h: H };
-  trimTimeline(now);
+  let now, pts;
+  let replayLabel = false;
+  if (isReplaying && recordingPoints) {
+    const curMs = replayAudio ? replayAudio.currentTime * 1000 : 0;
+    now = curMs;
+    pts = recordingPoints.filter(p => p.rel >= curMs - ROLL_WINDOW && p.rel <= curMs && p.midi >= minMidi && p.midi <= maxMidi);
+    replayLabel = true;
+  } else {
+    now = nowArg || performance.now();
+    pts = timeline.filter(p => p.midi >= minMidi && p.midi <= maxMidi);
+    trimTimeline(now);
+  }
 
   const c = getColors();
   const key = `${W}x${H}_${minMidi}_${maxMidi}_${c.bg}`;
@@ -425,17 +474,49 @@ function drawRoll() {
   // 时间标签
   rollCtx.fillStyle = c.text;
   rollCtx.textAlign = "right"; rollCtx.textBaseline = "top";
-  rollCtx.fillText("now", pL + pW - 4, 8);
+  rollCtx.fillText(replayLabel ? "REPLAY" : "now", pL + pW - 4, 8);
   rollCtx.textAlign = "left";
   rollCtx.fillText("-" + (ROLL_WINDOW / 1000) + "s", pL + 4, 8);
 
-  const pts = timeline.filter(p => p.midi >= minMidi && p.midi <= maxMidi);
+  // 跟唱目标线：橙色阶梯，当前音符高亮
+  if (targetMode && targetNotes.length && !isReplaying) {
+    const tNow = performance.now();
+    rollCtx.strokeStyle = "#f59e0b";
+    rollCtx.lineWidth = 2;
+    rollCtx.font = `700 ${W < 500 ? 9 : 10}px system-ui`;
+    for (let i = 0; i < targetNotes.length; i++) {
+      const n = targetNotes[i];
+      if (n.start + n.durMs < tNow - ROLL_WINDOW) continue;
+      const x1 = ptX(Math.max(n.start, tNow - ROLL_WINDOW), pL, pW, tNow);
+      const x2 = ptX(Math.min(n.start + n.durMs, tNow), pL, pW, tNow);
+      if (x2 <= x1) continue;
+      const y = midiCY(n.midi, H);
+      const active = i === targetIndex;
+      rollCtx.globalAlpha = active ? 0.95 : 0.45;
+      rollCtx.beginPath();
+      rollCtx.moveTo(x1, y);
+      rollCtx.lineTo(x2, y);
+      rollCtx.stroke();
+      if (active || n.start > tNow - ROLL_WINDOW) {
+        rollCtx.fillStyle = "#f59e0b";
+        rollCtx.textAlign = "left"; rollCtx.textBaseline = "bottom";
+        rollCtx.fillText(noteNameStr(n.midi), x1 + 3, y - 3);
+      }
+    }
+    rollCtx.globalAlpha = 1;
+  }
+
   if (!pts.length) {
     rollCtx.fillStyle = c.text;
     rollCtx.font = `700 ${W < 500 ? 14 : 16}px system-ui`;
     rollCtx.textAlign = "center"; rollCtx.textBaseline = "middle";
-    rollCtx.fillText("开始唱歌后", pL + pW / 2, H / 2 - 12);
-    rollCtx.fillText("这里会出现音高轨迹", pL + pW / 2, H / 2 + 12);
+    if (replayLabel) {
+      rollCtx.fillText("回放中…", pL + pW / 2, H / 2 - 12);
+      rollCtx.fillText("轨迹会随时间出现", pL + pW / 2, H / 2 + 12);
+    } else {
+      rollCtx.fillText("开始唱歌后", pL + pW / 2, H / 2 - 12);
+      rollCtx.fillText("这里会出现音高轨迹", pL + pW / 2, H / 2 + 12);
+    }
     return;
   }
 
@@ -568,11 +649,16 @@ function getRms(s) { let s2 = 0; for (const v of s) s2 += v * v; return Math.sqr
 function freqToNote(f) { const m = Math.round(69 + 12 * Math.log2(f / a4)); return { midi: m, name: NOTE_NAMES[((m % 12) + 12) % 12] + ((m / 12 | 0) - 1) }; }
 function noteToFreq(m) { return a4 * 2 ** ((m - 69) / 12); }
 function fmtCents(c) { return Math.abs(c) <= 5 ? "非常准" : (c > 0 ? "偏高 " + c : "偏低 " + Math.abs(c)); }
-function fmtStability(v) {
+function fmtStability(v, centsArr) {
   if (v.length < 6) return "采样中";
   const avg = v.reduce((a, b) => a + b, 0) / v.length;
   const dev = Math.sqrt(v.reduce((a, b) => a + (b - avg) ** 2, 0) / v.length);
-  return dev <= 6 ? "很稳定" : dev <= 14 ? "较稳定" : "波动明显";
+  let label = dev <= 6 ? "很稳定" : dev <= 14 ? "较稳定" : "波动明显";
+  if (centsArr && centsArr.length >= 30) {
+    const pct = Math.round(centsArr.filter(c => Math.abs(c) <= 10).length / centsArr.length * 100);
+    label += ` · ${pct}% 在 ±10¢`;
+  }
+  return label;
 }
 function clamp(v, lo, hi) { return Math.min(Math.max(v, lo), hi); }
 function setStatus(msg, err) {
@@ -591,10 +677,11 @@ function showNoPitch(msg) {
     needle.style.left = "50%";
   }
   pitchHistory.length = 0;
+  recentCents.length = 0;
   setStatus(msg, false);
 }
-function resetUI() { noteName.textContent = "--"; frequencyValue.textContent = "--"; centsText.textContent = "--"; targetFrequency.textContent = "-- Hz"; stability.textContent = "--"; volume.textContent = "--"; volumeBar.style.width = "0%"; needle.style.left = "50%"; smoothedFreq = null; smoothedCents = null; statHighMidi = -Infinity; statLowMidi = Infinity; statSumFreq = 0; statCount = 0; updateStats(); }
-function recordPoint(f, rms) { timeline.push({ midi: 69 + 12 * Math.log2(f / a4), frequency: f, rms, time: performance.now() }); trimTimeline(); }
+function resetUI() { noteName.textContent = "--"; frequencyValue.textContent = "--"; centsText.textContent = "--"; targetFrequency.textContent = "-- Hz"; stability.textContent = "--"; volume.textContent = "--"; volumeBar.style.width = "0%"; needle.style.left = "50%"; smoothedFreq = null; smoothedCents = null; statHighMidi = -Infinity; statLowMidi = Infinity; statSumFreq = 0; statCount = 0; statAccCount = 0; statAccuracy.textContent = "--"; statVibrato.textContent = "--"; statVibratoSub.textContent = "--"; lastVibratoText = ""; updateStats(); }
+function recordPoint(f, rms) { timeline.push({ midi: 69 + 12 * Math.log2(f / a4), frequency: f, rms, time: performance.now(), rel: performance.now() - sessionStartTime }); trimTimeline(); }
 
 /**
  * Insertion sort for small arrays (more efficient than Array.sort for n < 10)
@@ -646,6 +733,266 @@ function updateStats() {
 }
 function clearPitchRoll() { timeline.length = 0; bgCache = null; drawRoll(); }
 function trimTimeline() { const now = performance.now(); while (timeline.length && timeline[0].time < now - ROLL_WINDOW) timeline.shift(); }
+
+/* ═══════════════════════════════════════════
+   FOLLOW-ALONG TARGET MELODY
+   ═══════════════════════════════════════════ */
+const NOTE_MAP = { C:0, "C#":1, Db:1, D:2, "D#":3, Eb:3, E:4, F:5, "F#":6, Gb:6, G:7, "G#":8, Ab:8, A:9, "A#":10, Bb:10, B:11 };
+function parseNotes(str) {
+  const parts = String(str || "").trim().split(/[\s,，]+/).filter(Boolean);
+  const out = [];
+  for (const p of parts) {
+    const m = p.match(/^([A-Ga-g])([#b]?)(-?\d+)$/);
+    if (!m) continue;
+    const ni = NOTE_MAP[(m[1].toUpperCase() + m[2].toLowerCase())];
+    if (ni === undefined) continue;
+    const midi = (parseInt(m[3], 10) + 1) * 12 + ni;
+    if (midi >= 21 && midi <= 108) out.push(midi);
+  }
+  return out;
+}
+function toggleTargetMode() {
+  if (targetMode) { exitTargetMode(); return; }
+  const notes = parseNotes(targetInput.value);
+  if (!notes.length) {
+    setStatus("请输入有效音高，如 C4 E4 G4 C5。", true);
+    return;
+  }
+  const durMs = parseInt(targetDur.value, 10) || 2000;
+  targetStartTime = performance.now();
+  targetNotes = notes.map((midi, i) => ({ midi, durMs, start: targetStartTime + i * durMs, samples: null }));
+  targetMode = true;
+  targetIndex = 0;
+  targetScores = [];
+  targetToggle.textContent = "停止跟唱";
+  targetToggle.classList.add("active");
+  setStatus(`跟唱开始：${notes.map(noteNameStr).join(" ")}，按顺序演唱。`, false);
+}
+function exitTargetMode() {
+  targetMode = false;
+  targetNotes = [];
+  targetScores = [];
+  targetToggle.textContent = "开始跟唱";
+  targetToggle.classList.remove("active");
+  targetScore.textContent = "";
+  bgCache = null;
+}
+function updateTargetEval(freq, now) {
+  let idx = -1;
+  for (let i = 0; i < targetNotes.length; i++) {
+    if (now >= targetNotes[i].start && now < targetNotes[i].start + targetNotes[i].durMs) { idx = i; break; }
+    if (now < targetNotes[i].start) break;
+  }
+  if (idx === -1) {
+    if (now >= targetNotes[targetNotes.length - 1].start + targetNotes[targetNotes.length - 1].durMs) finishTargetMode();
+    return;
+  }
+  if (idx !== targetIndex) {
+    finalizeTargetNote(targetIndex);
+    targetIndex = idx;
+  }
+  const targetF = noteToFreq(targetNotes[idx].midi);
+  const cents = 1200 * Math.log2(freq / targetF);
+  if (!targetNotes[idx].samples) targetNotes[idx].samples = [];
+  targetNotes[idx].samples.push(cents);
+  targetScore.textContent = `第 ${idx + 1}/${targetNotes.length} 音 · ${fmtCents(Math.round(cents))}`;
+}
+function finalizeTargetNote(i) {
+  const n = targetNotes[i];
+  if (!n || !n.samples || !n.samples.length) return;
+  const avgAbs = n.samples.reduce((a, b) => a + Math.abs(b), 0) / n.samples.length;
+  targetScores[i] = Math.round(clamp(100 - avgAbs * 2.5, 0, 100));
+}
+function finishTargetMode() {
+  for (let i = 0; i < targetNotes.length; i++) finalizeTargetNote(i);
+  const done = targetScores.filter(s => s !== undefined);
+  if (done.length) {
+    const total = Math.round(done.reduce((a, b) => a + b, 0) / done.length);
+    targetScore.textContent = `跟唱完成 · 总分 ${total}/100（${done.length} 音）`;
+  }
+  targetMode = false;
+  targetToggle.textContent = "开始跟唱";
+  targetToggle.classList.remove("active");
+  bgCache = null;
+}
+
+/* ═══════════════════════════════════════════
+   RECORDING & PLAYBACK
+   ═══════════════════════════════════════════ */
+function startRecording() {
+  if (!stream || !window.MediaRecorder || isRecording) return;
+  try {
+    recordChunks = [];
+    mediaRecorder = new MediaRecorder(stream);
+    mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size) recordChunks.push(e.data); };
+    mediaRecorder.onstop = () => {
+      const blob = new Blob(recordChunks, { type: mediaRecorder.mimeType || "audio/webm" });
+      if (recordingUrl) URL.revokeObjectURL(recordingUrl);
+      recordingUrl = URL.createObjectURL(blob);
+      recordingPoints = timeline.map(p => ({ ...p }));
+      playbackButton.disabled = false;
+    };
+    mediaRecorder.start();
+    isRecording = true;
+    recordButton.textContent = "停止录音";
+    recordButton.classList.add("active");
+  } catch (e) {
+    console.warn("Recording failed:", e);
+  }
+}
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
+  mediaRecorder = null;
+  isRecording = false;
+  recordButton.textContent = "录音";
+  recordButton.classList.remove("active");
+}
+function togglePlayback() {
+  if (isReplaying) { exitReplay(); return; }
+  if (!recordingUrl) return;
+  replayAudio = new Audio(recordingUrl);
+  replayAudio.onended = exitReplay;
+  isReplaying = true;
+  playbackButton.textContent = "停止回放";
+  playbackButton.classList.add("active");
+  replayAudio.play();
+}
+function exitReplay() {
+  isReplaying = false;
+  if (replayAudio) { replayAudio.pause(); replayAudio = null; }
+  playbackButton.textContent = "回放";
+  playbackButton.classList.remove("active");
+}
+
+/* ═══════════════════════════════════════════
+   EXPORT
+   ═══════════════════════════════════════════ */
+function exportTimeline(format) {
+  if (!timeline.length) { setStatus("暂无轨迹数据，先开始监听。", true); return; }
+  const rows = timeline.map(p => ({
+    timeMs: Math.round(p.rel),
+    midi: +p.midi.toFixed(2),
+    note: noteNameStr(Math.round(p.midi)),
+    freqHz: +p.frequency.toFixed(2),
+    rms: +p.rms.toExponential(3),
+  }));
+  let content, type, name;
+  if (format === "csv") {
+    content = "time_ms,midi,note,freq_hz,rms\n" + rows.map(r => `${r.timeMs},${r.midi},${r.note},${r.freqHz},${r.rms}`).join("\n");
+    type = "text/csv"; name = "vocal-studio-pitch.csv";
+  } else {
+    content = JSON.stringify(rows, null, 2);
+    type = "application/json"; name = "vocal-studio-pitch.json";
+  }
+  const blob = new Blob([content], { type });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  setStatus(`已导出 ${name}（${rows.length} 个采样点）。`, false);
+}
+
+/* ═══════════════════════════════════════════
+   MICROPHONE DEVICES
+   ═══════════════════════════════════════════ */
+async function loadMicDevices() {
+  if (!micSelect || !navigator.mediaDevices?.enumerateDevices) return;
+  try {
+    micDevices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "audioinput");
+    micSelect.innerHTML = '<option value="">默认麦克风</option>' +
+      micDevices.map((d, i) => `<option value="${d.deviceId}">${d.label || `麦克风 ${i + 1}`}</option>`).join("");
+    if (selectedMicId && micDevices.some(d => d.deviceId === selectedMicId)) micSelect.value = selectedMicId;
+  } catch (e) { /* 忽略枚举失败 */ }
+}
+
+/* ═══════════════════════════════════════════
+   PRACTICE HISTORY
+   ═══════════════════════════════════════════ */
+function saveHistory() {
+  if (!statCount) return;
+  const rec = {
+    date: Date.now(),
+    durationMs: Math.round(performance.now() - sessionStartTime),
+    high: statHighMidi,
+    low: statLowMidi,
+    span: statHighMidi - statLowMidi,
+    accPct: Math.round(statAccCount / statCount * 100),
+  };
+  let hist = [];
+  try { hist = JSON.parse(localStorage.getItem("vs_history") || "[]"); } catch (e) {}
+  if (!Array.isArray(hist)) hist = [];
+  hist.unshift(rec);
+  hist = hist.slice(0, HISTORY_MAX);
+  localStorage.setItem("vs_history", JSON.stringify(hist));
+  renderHistory();
+}
+function renderHistory() {
+  let hist = [];
+  try { hist = JSON.parse(localStorage.getItem("vs_history") || "[]"); } catch (e) {}
+  const empty = $("#historyEmpty"), list = $("#historyList");
+  if (!hist.length) {
+    if (list) list.innerHTML = "";
+    if (empty) empty.style.display = "block";
+    return;
+  }
+  if (empty) empty.style.display = "none";
+  if (!list) return;
+  list.innerHTML = hist.map(r => {
+    const d = new Date(r.date);
+    const dateStr = `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    const dur = r.durationMs >= 60000 ? `${(r.durationMs / 60000).toFixed(1)} 分` : `${Math.round(r.durationMs / 1000)} 秒`;
+    const span = Number.isFinite(r.high) ? `${noteNameStr(r.low)}–${noteNameStr(r.high)}` : "--";
+    return `<div class="history-item"><span class="history-date">${dateStr}</span><span>${dur}</span><span>${span}</span><span>音准 ${r.accPct}%</span></div>`;
+  }).join("");
+}
+function clearHistory() {
+  localStorage.removeItem("vs_history");
+  renderHistory();
+  setStatus("练习历史已清空。", false);
+}
+
+/* ═══════════════════════════════════════════
+   ACCURACY & VIBRATO
+   ═══════════════════════════════════════════ */
+function updateAccuracyAndVibrato(now) {
+  if (statAccuracy && statCount > 0) {
+    const pct = Math.round(statAccCount / statCount * 100);
+    const txt = pct + "%";
+    if (statAccuracy.textContent !== txt) statAccuracy.textContent = txt;
+  }
+  const vib = analyzeVibrato(timeline, now);
+  if (!vib) {
+    if (lastVibratoText !== "") { statVibrato.textContent = "--"; statVibratoSub.textContent = "--"; lastVibratoText = ""; }
+    return;
+  }
+  const txt = `${vib.rate.toFixed(1)} Hz`;
+  if (txt !== lastVibratoText) {
+    statVibrato.textContent = txt;
+    statVibratoSub.textContent = `幅度 ±${vib.extent.toFixed(0)}¢`;
+    lastVibratoText = txt;
+  }
+}
+function analyzeVibrato(pts, now) {
+  const start = now - VIBRATO_WINDOW_MS;
+  const seg = pts.filter(p => p.time >= start);
+  if (seg.length < 40) return null;
+  const vals = seg.map(p => p.midi);
+  const peaks = [], troughs = [];
+  for (let i = 1; i < vals.length - 1; i++) {
+    if (vals[i] > vals[i - 1] && vals[i] >= vals[i + 1]) peaks.push(vals[i]);
+    if (vals[i] < vals[i - 1] && vals[i] <= vals[i + 1]) troughs.push(vals[i]);
+  }
+  const cycles = Math.min(peaks.length, troughs.length);
+  if (cycles < 3) return null;
+  const tSpanMs = Math.max(1, seg[seg.length - 1].time - seg[0].time);
+  const rate = cycles / (tSpanMs / 1000);
+  if (rate < 2 || rate > 10) return null; // 人声颤音通常 4-7Hz
+  let sum = 0;
+  for (let k = 0; k < cycles; k++) sum += Math.abs(peaks[k] - troughs[k]);
+  const extent = sum / cycles * 100; // 1 半音 = 100 cents
+  return { rate, extent };
+}
 
 /* ═══════════════════════════════════════════
    KEYBOARD SHORTCUTS
@@ -716,6 +1063,18 @@ document.addEventListener("keydown", (e) => {
 startButton.addEventListener("click", start);
 stopButton.addEventListener("click", stop);
 clearRollButton.addEventListener("click", clearPitchRoll);
+if (exportCsvButton) exportCsvButton.addEventListener("click", () => exportTimeline("csv"));
+if (exportJsonButton) exportJsonButton.addEventListener("click", () => exportTimeline("json"));
+if (recordButton) recordButton.addEventListener("click", () => { isRecording ? stopRecording() : startRecording(); });
+if (playbackButton) playbackButton.addEventListener("click", togglePlayback);
+if (targetToggle) targetToggle.addEventListener("click", toggleTargetMode);
+if (micSelect) {
+  micSelect.addEventListener("change", () => {
+    selectedMicId = micSelect.value || "";
+    localStorage.setItem("vs_mic_id", selectedMicId);
+  });
+}
+if ($("#clearHistoryButton")) $("#clearHistoryButton").addEventListener("click", clearHistory);
 
 // Debounced resize handler
 let resizeTimeout;
@@ -741,6 +1100,8 @@ $$(".pill").forEach(b => b.addEventListener("click", () => {
 
 resizeRoll();
 rollAnimId = requestAnimationFrame(tickRoll);
+loadMicDevices();
+renderHistory();
 
 /* ─── Scroll to top on load ─── */
 window.scrollTo(0, 0);
@@ -749,10 +1110,12 @@ window.scrollTo(0, 0);
 const revealObs = new IntersectionObserver((entries) => {
   entries.forEach((e) => { if (e.isIntersecting) { e.target.classList.add("visible"); revealObs.unobserve(e.target); } });
 }, { threshold: 0.1, rootMargin: "0px 0px -30px 0px" });
-$$(".hero, .roll-section, .stats-section, .tips-section, .shortcuts-section, .tuner-panel").forEach((el) => revealObs.observe(el));
+$$(".hero, .roll-section, .stats-section, .history-section, .tips-section, .shortcuts-section, .tuner-panel").forEach((el) => revealObs.observe(el));
 
 /* ─── Cleanup on page unload ─── */
 window.addEventListener("beforeunload", () => {
+  exitReplay();
+  stopRecording();
   if (isListening) {
     cancelAnimationFrame(animId);
     stream?.getTracks().forEach(t => t.stop());

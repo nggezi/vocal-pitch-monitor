@@ -1,6 +1,6 @@
 {
   "name": "vocal-pitch-monitor",
-  "version": "3.3.0",
+  "version": "4.0.0",
   "private": true,
   "description": "Vocal Studio - 实时练唱音高监测",
   "scripts": {

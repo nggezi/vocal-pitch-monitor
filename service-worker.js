@@ -1,4 +1,4 @@
-const CACHE = "vocal-studio-v8";
+const CACHE = "vocal-studio-v9";
 const ASSETS = [
   "./",
   "./index.html",

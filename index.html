@@ -110,6 +110,10 @@
           </button>
           <button id="stopButton" class="cta cta-ghost" disabled aria-label="停止监听">停止</button>
         </div>
+        <div class="mic-row">
+          <label class="range-label" for="micSelect">麦克风</label>
+          <select id="micSelect" class="a4-select" aria-label="选择麦克风设备"></select>
+        </div>
         <p id="status" class="status-text" role="status" aria-live="polite">等待开始。建议使用 Chrome / Edge。</p>
       </header>
 
@@ -122,7 +126,13 @@
                 <span class="tag">PITCH TIMELINE</span>
                 <h2>钢琴窗音高轨迹</h2>
               </div>
-              <button id="clearRollButton" class="cta cta-ghost cta-sm" aria-label="清空音高轨迹">清空</button>
+              <div class="roll-actions">
+                <button id="exportCsvButton" class="cta cta-ghost cta-sm" aria-label="导出轨迹为 CSV">CSV</button>
+                <button id="exportJsonButton" class="cta cta-ghost cta-sm" aria-label="导出轨迹为 JSON">JSON</button>
+                <button id="recordButton" class="cta cta-ghost cta-sm" disabled aria-label="开始或停止录音">录音</button>
+                <button id="playbackButton" class="cta cta-ghost cta-sm" disabled aria-label="回放录音">回放</button>
+                <button id="clearRollButton" class="cta cta-ghost cta-sm" aria-label="清空音高轨迹">清空</button>
+              </div>
             </div>
 
             <div class="range-row" role="radiogroup" aria-label="选择显示音域">
@@ -143,6 +153,18 @@
                   <option value="443">443 Hz</option>
                 </select>
               </div>
+            </div>
+
+            <div class="target-row">
+              <span class="range-label">跟唱</span>
+              <input id="targetInput" class="target-input" placeholder="目标音高，如 C4 E4 G4 C5" aria-label="目标音高序列" />
+              <select id="targetDur" class="a4-select" aria-label="每个音符时长">
+                <option value="1500">1.5s/音</option>
+                <option value="2000" selected>2s/音</option>
+                <option value="3000">3s/音</option>
+              </select>
+              <button id="targetToggle" class="cta cta-ghost cta-sm" aria-label="开始或停止跟唱">开始跟唱</button>
+              <span id="targetScore" class="target-score" aria-live="polite"></span>
             </div>
 
             <div class="canvas-shell">
@@ -183,10 +205,35 @@
                 <strong id="statSpan" class="stat-value">--</strong>
                 <span id="statSpanNote" class="stat-sub">--</span>
               </div>
+              <div class="stat-card">
+                <span class="stat-label">音准保持</span>
+                <strong id="statAccuracy" class="stat-value">--</strong>
+                <span id="statAccuracySub" class="stat-sub">±10 cents 内占比</span>
+              </div>
+              <div class="stat-card">
+                <span class="stat-label">颤音</span>
+                <strong id="statVibrato" class="stat-value">--</strong>
+                <span id="statVibratoSub" class="stat-sub">--</span>
+              </div>
             </div>
             <div class="stats-note">
               <p>数据来自当前监听会话，停止后重置。</p>
             </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Practice History -->
+      <section class="history-section" aria-label="练习历史">
+        <div class="history-shell">
+          <div class="history-core">
+            <div class="stats-header">
+              <span class="tag">PRACTICE HISTORY</span>
+              <h2>练习历史</h2>
+            </div>
+            <div id="historyList" class="history-list"></div>
+            <p id="historyEmpty" class="history-empty">还没有练习记录，完成一次监听后自动保存。</p>
+            <button id="clearHistoryButton" class="cta cta-ghost cta-sm" aria-label="清空练习历史">清空历史</button>
           </div>
         </div>
       </section>
@@ -255,7 +302,7 @@
 
       <footer class="foot">
         <span>nggezi</span>
-        <span class="ver">v3.4</span>
+        <span class="ver">v4.0</span>
         <a href="https://github.com/nggezi" target="_blank" rel="noopener">GitHub</a>
       </footer>
     </div>
