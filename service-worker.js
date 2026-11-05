@@ -1,4 +1,4 @@
-const CACHE = "vocal-studio-v11";
+const CACHE = "vocal-studio-v12";
 const ASSETS = [
   "./",
   "./index.html",
@@ -31,6 +31,22 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   // Skip non-GET requests
   if (e.request.method !== "GET") return;
+
+  // 页面导航走网络优先：部署后立即拿到新 HTML，避免旧缓存页面先出现
+  if (e.request.mode === "navigate") {
+    e.respondWith(
+      fetch(e.request).then((response) => {
+        if (response && response.status === 200) {
+          const responseClone = response.clone();
+          caches.open(CACHE).then((cache) => cache.put(e.request, responseClone));
+        }
+        return response;
+      }).catch(() =>
+        caches.match(e.request).then((cached) => cached || caches.match(OFFLINE_PAGE))
+      )
+    );
+    return;
+  }
   
   e.respondWith(
     caches.match(e.request).then((cached) => {

@@ -4,7 +4,7 @@ Vocal Studio 是一个纯前端的实时练唱音高监测工具。它通过浏�
 
 项目不依赖后端服务，不上传录音数据，适合作为声乐练习、音准训练、发声稳定性观察和前端音频处理学习示例。
 
-> 当前版本：**v4.2**
+> 当前版本：**v4.3**
 
 ## 功能概览
 
@@ -300,12 +300,12 @@ YIN 检测核心参数（`YIN_THRESHOLD`、`YIN_STRONG_THRESHOLD`、`PITCH_MIN /
 项目包含：
 
 - `manifest.json`：定义应用名称、主题色、启动路径和图标；
-- `service-worker.js`：安装时缓存核心资源，支持 stale-while-revalidate 策略和离线回退。
+- `service-worker.js`：页面导航网络优先（部署后立即生效），静态资源 stale-while-revalidate，离线时回退缓存页面。
 
 当前缓存名为：
 
 ```js
-vocal-studio-v11
+vocal-studio-v12
 ```
 
 缓存资源包括：
@@ -435,6 +435,12 @@ node test/pitch.test.js
 - 调整中值滤波窗口 `MEDIAN_WINDOW`；
 - 增加新的统计指标；
 - 修改参考音波形或音量包络。
+
+## v4.3 更新日志
+
+### Bug 修复
+- 修复部署新版本后首次访问仍显示旧页面的问题：页面导航改为网络优先，新 Service Worker 接管时自动刷新一次
+- 补充总结弹窗的初始化隐藏保护，即使遇到旧 HTML 也不会挡住界面
 
 ## v4.2 更新日志
 

@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════
-   VOCAL STUDIO — Engine v4.2
+   VOCAL STUDIO — Engine v4.3
    ═══════════════════════════════════════════ */
 
 const $ = (s) => document.querySelector(s);
@@ -110,12 +110,23 @@ if (!localStorage.getItem("vs_guide_seen")) {
 } else {
   guideOverlay.classList.add("hidden");
 }
+// 防御性隐藏：即使拿到的是旧版 HTML，也不让空的总结弹窗挡住界面
+if (summaryOverlay) summaryOverlay.classList.add("hidden");
 
 /* ═══════════════════════════════════════════
    PWA
    ═══════════════════════════════════════════ */
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("./service-worker.js").catch(() => {});
+  const swHadController = !!navigator.serviceWorker.controller;
+  let swRefreshing = false;
+  // 新版本 Service Worker 接管后刷新一次，避免继续停留在旧缓存页面
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (!swHadController || swRefreshing) return;
+    if (isListening) return; // 练习中不刷新，下次进入时再生效
+    swRefreshing = true;
+    location.reload();
+  });
+  navigator.serviceWorker.register("./service-worker.js", { updateViaCache: "none" }).catch(() => {});
 }
 
 /* ═══════════════════════════════════════════
