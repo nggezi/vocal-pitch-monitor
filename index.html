@@ -20,7 +20,7 @@
   <div class="glow glow-2" aria-hidden="true"></div>
 
   <!-- Guide Overlay -->
-  <div id="guideOverlay" class="guide-overlay" role="dialog" aria-label="使用引导">
+  <div id="guideOverlay" class="guide-overlay hidden" role="dialog" aria-label="使用引导">
     <div class="guide-card">
       <div class="guide-icon">🎤</div>
       <h2>欢迎使用 Vocal Studio</h2>
@@ -39,7 +39,7 @@
   </div>
 
   <!-- Session Summary -->
-  <div id="summaryOverlay" class="guide-overlay" role="dialog" aria-label="会话总结">
+  <div id="summaryOverlay" class="guide-overlay hidden" role="dialog" aria-label="会话总结">
     <div class="guide-card summary-card">
       <div class="guide-icon">📊</div>
       <h2>本次练习总结</h2>
@@ -58,6 +58,7 @@
   <a href="#mainContent" class="skip-link">跳转到主要内容</a>
 
   <div class="layout" id="mainContent">
+    <span id="srAnnounce" class="sr-only" aria-live="polite"></span>
     <!-- Left: Tuner Panel -->
     <aside class="tuner-panel" aria-live="polite" aria-label="实时调音器">
       <div class="tuner-shell">
@@ -200,7 +201,7 @@
               </select>
               <button id="targetListen" class="cta cta-ghost cta-sm" aria-label="试听目标旋律">试听</button>
               <button id="targetToggle" class="cta cta-ghost cta-sm" aria-label="开始或停止跟唱">开始跟唱</button>
-              <span id="targetScore" class="target-score" aria-live="polite"></span>
+              <span id="targetScore" class="target-score"></span>
             </div>
 
             <div class="window-row">
@@ -348,7 +349,7 @@
 
       <footer class="foot">
         <span>nggezi</span>
-        <span class="ver">v4.1</span>
+        <span class="ver">v4.2</span>
         <a href="https://github.com/nggezi" target="_blank" rel="noopener">GitHub</a>
       </footer>
     </div>

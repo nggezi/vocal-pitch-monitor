@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════
-   VOCAL STUDIO — Engine v4.1
+   VOCAL STUDIO — Engine v4.2
    ═══════════════════════════════════════════ */
 
 const $ = (s) => document.querySelector(s);
@@ -39,6 +39,7 @@ const guideClose = $("#guideClose");
 const summaryOverlay = $("#summaryOverlay");
 const summaryBody = $("#summaryBody");
 const summaryClose = $("#summaryClose");
+const srAnnounce = $("#srAnnounce");
 const rollCtx = pitchRoll.getContext("2d");
 
 /* ─── Constants ─── */
@@ -89,6 +90,9 @@ let lastDetectTime = 0;
 let a4 = parseFloat(localStorage.getItem("vs_a4")) || 440;
 let statAccCount = 0;
 let lastVibratoText = "";
+let lastStatsTime = 0;
+let lastAuxTime = 0;
+let rollDirty = true;
 
 /* ─── Vocal Range Stats ─── */
 let statHighMidi = -Infinity, statLowMidi = Infinity;
@@ -123,12 +127,30 @@ function applyTheme(t) {
   localStorage.setItem("vs_theme", t);
   colorCache = null;
   bgCache = null;
+  rollDirty = true;
 }
 themeToggle.addEventListener("click", () => {
   applyTheme(document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light");
 });
 const savedTheme = localStorage.getItem("vs_theme");
 if (savedTheme) applyTheme(savedTheme);
+
+/* ═══════════════════════════════════════════
+   SAVED SETTINGS
+   ═══════════════════════════════════════════ */
+const savedWindow = parseInt(localStorage.getItem("vs_rollwindow"), 10);
+if ([5000, 14000, 30000].includes(savedWindow)) rollWindow = savedWindow;
+const savedTargetInput = localStorage.getItem("vs_target_input");
+if (savedTargetInput && targetInput) targetInput.value = savedTargetInput;
+const savedTargetDur = localStorage.getItem("vs_target_dur");
+if (savedTargetDur && targetDur) targetDur.value = savedTargetDur;
+const savedTargetRoot = localStorage.getItem("vs_target_root");
+if (savedTargetRoot && targetRoot) targetRoot.value = savedTargetRoot;
+const savedPreset = localStorage.getItem("vs_target_preset");
+if (savedPreset && targetPreset) targetPreset.value = savedPreset;
+$$("#windowGroup .pill").forEach(p => {
+  p.classList.toggle("active", parseInt(p.dataset.window, 10) === rollWindow);
+});
 
 /* ═══════════════════════════════════════════
    A4 REFERENCE TUNING
@@ -346,14 +368,15 @@ function detect(ts) {
     if (noteMidi < statLowMidi) statLowMidi = noteMidi;
     statSumFreq += smoothedFreq;
     statCount++;
-    updateStats();
+    // 统计面板与辅助指标限频刷新，减少每帧 DOM 写入
+    if (now - lastStatsTime >= 100) { updateStats(); lastStatsTime = now; }
     noteName.textContent = note.name;
     frequencyValue.textContent = smoothedFreq.toFixed(1);
     targetFrequency.textContent = target.toFixed(1) + " Hz";
     centsText.textContent = fmtCents(Math.round(smoothedCents));
     stability.textContent = fmtStability(pitchHistory, recentCents);
     needle.style.left = (50 + clamp(smoothedCents, -50, 50)) + "%";
-    updateAccuracyAndVibrato(now);
+    if (now - lastAuxTime >= 250) { updateAccuracyAndVibrato(now); lastAuxTime = now; }
   } else if (smoothedFreq !== null && now - lastPitchTime < HOLD_MS) {
     recordPoint(smoothedFreq, rms, smoothedCents);
     // Reset buffer when we lose voice but are holding the last pitch
@@ -399,11 +422,17 @@ function resizeRoll() {
   pitchRoll.height = Math.max(1, rect.height * r | 0);
   rollCtx.setTransform(r, 0, 0, r, 0, 0);
   bgCache = null;
+  rollDirty = true;
   drawRoll();
 }
 
 function tickRoll(ts) {
-  if (ts - lastRollTime >= 33) { lastRollTime = ts; drawRoll(); }
+  if (ts - lastRollTime >= 33) {
+    lastRollTime = ts;
+    // 空闲且无新数据时跳过重绘，降低静止状态下的绘制开销
+    const idle = !isListening && !isReplaying && !targetMode && timeline.length === 0;
+    if (!idle || rollDirty) { drawRoll(); rollDirty = false; }
+  }
   rollAnimId = requestAnimationFrame(tickRoll);
 }
 
@@ -756,7 +785,7 @@ function updateStats() {
   spanEl.textContent = spanSemitones + " 半音";
   spanNote.textContent = "约 " + spanOctaves + " 个八度";
 }
-function clearPitchRoll() { timeline.length = 0; bgCache = null; drawRoll(); }
+function clearPitchRoll() { timeline.length = 0; bgCache = null; rollDirty = true; drawRoll(); }
 function trimTimeline() { const now = performance.now(); while (timeline.length && timeline[0].time < now - rollWindow) timeline.shift(); }
 
 /* ═══════════════════════════════════════════
@@ -795,6 +824,7 @@ function applyPreset() {
   if (!steps) return;
   const notes = steps.map(s => root + s).map(noteNameStr);
   targetInput.value = notes.join(" ");
+  localStorage.setItem("vs_target_input", targetInput.value);
   setStatus(`已生成${targetPreset.options[targetPreset.selectedIndex].text}：${notes.join(" ")}`, false);
 }
 function previewTarget() {
@@ -861,6 +891,7 @@ function updateTargetEval(freq, now) {
   if (idx !== targetIndex) {
     finalizeTargetNote(targetIndex);
     targetIndex = idx;
+    announce(`第 ${idx + 1} 音，目标 ${noteNameStr(targetNotes[idx].midi)}`);
   }
   const targetF = noteToFreq(targetNotes[idx].midi);
   const cents = 1200 * Math.log2(freq / targetF);
@@ -880,6 +911,7 @@ function finishTargetMode() {
   if (done.length) {
     const total = Math.round(done.reduce((a, b) => a + b, 0) / done.length);
     targetScore.textContent = `跟唱完成 · 总分 ${total}/100（${done.length} 音）`;
+    announce(`跟唱完成，总分 ${total} 分。`);
   }
   targetMode = false;
   targetToggle.textContent = "开始跟唱";
@@ -890,6 +922,11 @@ function targetTotalScore() {
   const done = targetScores.filter(s => s !== undefined);
   if (!done.length) return null;
   return Math.round(done.reduce((a, b) => a + b, 0) / done.length);
+}
+function announce(msg) {
+  if (!srAnnounce || !msg) return;
+  if (srAnnounce.textContent === msg) return;
+  srAnnounce.textContent = msg;
 }
 function showSessionSummary() {
   if (!summaryOverlay || !summaryBody || !statCount) return;
@@ -905,10 +942,25 @@ function showSessionSummary() {
     ["颤音", vibText],
   ];
   if (score !== null) rows.push(["跟唱得分", `${score} / 100`]);
-  summaryBody.innerHTML = rows.map(([k, v]) =>
+  let html = rows.map(([k, v]) =>
     `<div class="summary-row"><span class="summary-label">${k}</span><strong class="summary-value">${v}</strong></div>`
   ).join("");
+  // 跟唱逐音得分条
+  if (score !== null && targetNotes.length) {
+    const bars = targetNotes.map((n, i) => {
+      const s = targetScores[i];
+      const cls = s === undefined ? "miss" : s >= 85 ? "good" : s >= 60 ? "ok" : "bad";
+      const width = s === undefined ? 0 : Math.max(4, s);
+      return `<div class="summary-note"><span class="summary-note-name">${noteNameStr(n.midi)}</span>` +
+        `<span class="summary-note-track"><span class="summary-note-fill ${cls}" style="width:${width}%"></span></span>` +
+        `<span class="summary-note-score">${s === undefined ? "-" : s}</span></div>`;
+    }).join("");
+    html += `<div class="summary-notes">${bars}</div>`;
+  }
+  summaryBody.innerHTML = html;
   summaryOverlay.classList.remove("hidden");
+  announce(`练习总结：时长 ${durText}，音准保持率 ${accPct}%${score !== null ? `，跟唱得分 ${score}` : ""}。`);
+  if (summaryClose) summaryClose.focus();
 }
 
 /* ═══════════════════════════════════════════
@@ -1113,11 +1165,30 @@ function analyzeVibrato(pts, now) {
 }
 
 /* ═══════════════════════════════════════════
+   VIEW WINDOW
+   ═══════════════════════════════════════════ */
+function setRollWindow(ms) {
+  rollWindow = [5000, 14000, 30000].includes(ms) ? ms : 14000;
+  localStorage.setItem("vs_rollwindow", String(rollWindow));
+  $$("#windowGroup .pill").forEach(p => {
+    p.classList.toggle("active", parseInt(p.dataset.window, 10) === rollWindow);
+  });
+  trimTimeline();
+  rollDirty = true;
+}
+function cycleRollWindow() {
+  const order = [5000, 14000, 30000];
+  const next = order[(order.indexOf(rollWindow) + 1) % order.length];
+  setRollWindow(next);
+  setStatus(`时间窗切换为 ${next / 1000} 秒。`, false);
+}
+
+/* ═══════════════════════════════════════════
    KEYBOARD SHORTCUTS
    ═══════════════════════════════════════════ */
 document.addEventListener("keydown", (e) => {
   // Don't trigger shortcuts when typing in input fields
-  if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+  if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT") return;
   
   switch (e.key) {
     case " ":
@@ -1144,7 +1215,7 @@ document.addEventListener("keydown", (e) => {
         if (range) {
           minMidi = range.min;
           maxMidi = range.max;
-          $$(".pill").forEach(p => p.classList.toggle("active", p.dataset.range === rangeKey));
+          $$(".pill").forEach(p => { if (p.dataset.range) p.classList.toggle("active", p.dataset.range === rangeKey); });
           bgCache = null;
         }
       }
@@ -1159,9 +1230,26 @@ document.addEventListener("keydown", (e) => {
       // C: Clear pitch roll
       clearPitchRoll();
       break;
+    case "r":
+    case "R":
+      // R: Toggle recording (while listening)
+      if (isListening) { isRecording ? stopRecording() : startRecording(); }
+      break;
+    case "g":
+    case "G":
+      // G: Toggle follow-along mode
+      toggleTargetMode();
+      break;
+    case "w":
+    case "W":
+      // W: Cycle time window
+      cycleRollWindow();
+      break;
     case "Escape":
-      // Escape: Close guide or stop listening
-      if (!guideOverlay.classList.contains("hidden")) {
+      // Escape: Close summary / guide, otherwise stop listening
+      if (summaryOverlay && !summaryOverlay.classList.contains("hidden")) {
+        summaryOverlay.classList.add("hidden");
+      } else if (!guideOverlay.classList.contains("hidden")) {
         guideOverlay.classList.add("hidden");
         localStorage.setItem("vs_guide_seen", "1");
       } else if (isListening) {
@@ -1186,7 +1274,16 @@ if (exportJsonButton) exportJsonButton.addEventListener("click", () => exportTim
 if (recordButton) recordButton.addEventListener("click", () => { isRecording ? stopRecording() : startRecording(); });
 if (playbackButton) playbackButton.addEventListener("click", togglePlayback);
 if (targetToggle) targetToggle.addEventListener("click", toggleTargetMode);
-if (targetPreset) targetPreset.addEventListener("change", applyPreset);
+if (targetPreset) targetPreset.addEventListener("change", () => {
+  localStorage.setItem("vs_target_preset", targetPreset.value);
+  applyPreset();
+});
+if (targetRoot) targetRoot.addEventListener("change", () => {
+  localStorage.setItem("vs_target_root", targetRoot.value);
+  if (targetPreset && targetPreset.value) applyPreset();
+});
+if (targetInput) targetInput.addEventListener("change", () => localStorage.setItem("vs_target_input", targetInput.value));
+if (targetDur) targetDur.addEventListener("change", () => localStorage.setItem("vs_target_dur", targetDur.value));
 if (targetListen) targetListen.addEventListener("click", previewTarget);
 if (summaryClose) summaryClose.addEventListener("click", () => summaryOverlay.classList.add("hidden"));
 if (micSelect) {
@@ -1196,12 +1293,7 @@ if (micSelect) {
   });
 }
 if ($("#clearHistoryButton")) $("#clearHistoryButton").addEventListener("click", clearHistory);
-$$("#windowGroup .pill").forEach(b => b.addEventListener("click", () => {
-  rollWindow = parseInt(b.dataset.window, 10) || 14000;
-  $$("#windowGroup .pill").forEach(p => p.classList.toggle("active", p === b));
-  trimTimeline();
-  bgCache = null;
-}));
+$$("#windowGroup .pill").forEach(b => b.addEventListener("click", () => setRollWindow(parseInt(b.dataset.window, 10))));
 
 // Debounced resize handler
 let resizeTimeout;
@@ -1221,8 +1313,9 @@ $$(".pill").forEach(b => b.addEventListener("click", () => {
   const r = RANGES[b.dataset.range];
   if (!r) return;
   minMidi = r.min; maxMidi = r.max;
-  $$(".pill").forEach(p => p.classList.toggle("active", p === b));
+  $$(".pill").forEach(p => { if (p.dataset.range) p.classList.toggle("active", p === b); });
   bgCache = null;
+  rollDirty = true;
 }));
 
 resizeRoll();
