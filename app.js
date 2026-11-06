@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════
-   VOCAL STUDIO — Engine v4.3
+   VOCAL STUDIO — Engine v4.4
    ═══════════════════════════════════════════ */
 
 const $ = (s) => document.querySelector(s);
@@ -64,7 +64,7 @@ const VIBRATO_WINDOW_MS = 3000; // 颤音分析时间窗口
 
 /* ─── State ─── */
 let audioCtx, analyser, mic, stream, buffer;
-let refAudioCtx;
+let refAudioCtx, refOutput;
 let animId, rollAnimId;
 let mediaRecorder = null, recordChunks = [], isRecording = false;
 let sessionStartTime = 0, recordingUrl = null, recordingPoints = null;
@@ -679,6 +679,14 @@ function playRefNote(midi) {
   try {
     if (!refAudioCtx) {
       refAudioCtx = new AudioContext({ latencyHint: "interactive" });
+      // 软限幅：连续点击多个音时避免叠加削波
+      refOutput = refAudioCtx.createDynamicsCompressor();
+      refOutput.threshold.value = -14;
+      refOutput.knee.value = 12;
+      refOutput.ratio.value = 4;
+      refOutput.attack.value = 0.003;
+      refOutput.release.value = 0.2;
+      refOutput.connect(refAudioCtx.destination);
     }
     
     // Resume if suspended
@@ -686,16 +694,28 @@ function playRefNote(midi) {
       refAudioCtx.resume();
     }
     
+    const freq = noteToFreq(midi);
     const osc = refAudioCtx.createOscillator();
     const gain = refAudioCtx.createGain();
     const t = refAudioCtx.currentTime;
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(noteToFreq(midi), t);
+
+    // 谐波音色：低音区加强 2/3 次泛音，手机与笔记本小喇叭也能听清音高
+    const h2 = freq < 200 ? 0.55 : freq < 500 ? 0.38 : 0.24;
+    const h3 = freq < 200 ? 0.34 : freq < 500 ? 0.22 : 0.12;
+    const imag = new Float32Array([0, 1, h2, h3, h3 * 0.35]);
+    const real = new Float32Array(imag.length);
+    osc.setPeriodicWave(refAudioCtx.createPeriodicWave(real, imag));
+    osc.frequency.setValueAtTime(freq, t);
+
+    // 更亮的音量与更长的保持时间，便于跟唱对照
+    const peak = freq < 150 ? 0.42 : 0.35;
     gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(0.18, t + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.62);
-    osc.connect(gain); gain.connect(refAudioCtx.destination);
-    osc.start(t); osc.stop(t + 0.65);
+    gain.gain.exponentialRampToValueAtTime(peak, t + 0.01);
+    gain.gain.exponentialRampToValueAtTime(peak * 0.75, t + 0.55);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 1.25);
+    osc.connect(gain);
+    gain.connect(refOutput || refAudioCtx.destination);
+    osc.start(t); osc.stop(t + 1.3);
     
     // Cleanup after playback
     osc.onended = () => {
